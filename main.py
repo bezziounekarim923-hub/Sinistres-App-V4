@@ -919,6 +919,11 @@ class App(tk.Tk):
         hsb.pack(side="bottom", fill="x")
         self.tree_sinistres.pack(side="left", fill="both", expand=True)
         self.tree_sinistres.bind("<Double-1>", lambda e: self._edit_record())
+        # Menu contextuel (clic droit) sur un sinistre : actions rapides
+        # (ajouter, modifier, générer la fiche, supprimer). Le double-clic
+        # reste sur « Modifier ».
+        self.menu_sinistres = tk.Menu(self.tree_sinistres, tearoff=0)
+        self.tree_sinistres.bind("<Button-3>", self._show_sinistre_context_menu)
 
     def _apply_filters(self, event=None):
         annee = self.cb_annee.get()
@@ -1073,6 +1078,33 @@ class App(tk.Tk):
         if numero:
             return f"N°{numero}"
         return f"#{record.get('id')}"
+
+    def _show_sinistre_context_menu(self, event):
+        tree = self.tree_sinistres
+        row_id = tree.identify_row(event.y)
+        if row_id:
+            if row_id not in tree.selection():
+                tree.selection_set(row_id)
+                tree.focus(row_id)
+
+        has_selection = bool(tree.selection())
+        state_create = "normal" if self.has_permission("create") else "disabled"
+        state_edit = "normal" if (self.has_permission("edit") and has_selection) else "disabled"
+        state_delete = "normal" if (self.has_permission("delete") and has_selection) else "disabled"
+        state_action = "normal" if has_selection else "disabled"
+
+        menu = self.menu_sinistres
+        menu.delete(0, "end")
+        menu.add_command(label="➕ Ajouter un sinistre", command=self._add_record, state=state_create)
+        menu.add_command(label="✏ Modifier ce sinistre", command=self._edit_record, state=state_edit)
+        menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
+        menu.add_separator()
+        menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def _generate_fiche(self):
         """Génère la fiche de sinistre officielle pour le sinistre sélectionné.
