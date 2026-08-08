@@ -6,12 +6,15 @@ Gère les variantes d'intitulés de colonnes selon les années.
 import os
 import re
 import shutil
+import logging
 import unicodedata
 import datetime
 import openpyxl
 from openpyxl.styles import PatternFill
 
 import database as db
+
+logger = logging.getLogger(__name__)
 
 # Mots-clés (normalisés) -> nom de colonne interne.
 # On associe chaque variante d'intitulé rencontrée dans le fichier au champ normalisé.
@@ -520,6 +523,10 @@ def _cell_fill_hex(cell):
             return None  # blanc/noir : probablement pas une couleur de statut significative
         return "#" + rgb.upper()
     except Exception:
+        # Pas de couleur détectable (cellule sans remplissage solide, couleur
+        # malformée...) : best-effort, on retourne None pour retomber sur les
+        # couleurs par défaut. Debug uniquement (appelé très souvent).
+        logger.debug("Aucune couleur détectable sur la cellule %s", cell.coordinate, exc_info=True)
         return None
 
 

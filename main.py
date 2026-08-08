@@ -7,6 +7,14 @@ Lancer avec : python main.py
 """
 import os
 import sys
+import logging
+
+# Configuration du logging avant tout le reste (stdlib-only, sans tkinter) afin
+# que les avertissements auparavant avalés silencieusement (S4) soient capturés
+# dans un fichier tournant dès le démarrage.
+import app_logging
+app_logging.setup_logging()
+
 import json
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox

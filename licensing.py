@@ -18,12 +18,15 @@ Principe :
 import os
 import json
 import hmac
+import logging
 import hashlib
 import secrets
 import base64
 import datetime
 
 import database as db
+
+logger = logging.getLogger(__name__)
 
 # Secret intégré à l'application, utilisé pour signer les licences. Il ne suffit
 # pas à lui seul : sans le mot de passe maître (défini localement, jamais stocké
@@ -34,6 +37,40 @@ APP_SECRET = "SUIVI-SINISTRES-LICENSE-SIGNING-KEY-2026"
 LICENSE_FILE = "license.json"
 MASTER_FILE = "license_master.json"
 DEFAULT_DURATION_DAYS = 365
+
+# Paramètres du hachage du mot de passe maître (S1) : PBKDF2-HMAC-SHA256, comme
+# pour les comptes utilisateurs. Compatibilité ascendante avec l'ancien format
+# SHA-256 monopasse (fichier {"salt", "hash"}) : check_master_password reconnaît
+# les deux et re-hache en PBKDF2 dès une vérification réussie.
+MASTER_PBKDF2_ITERATIONS = 200_000
+MASTER_PBKDF2_SALT_BYTES = 16
+MASTER_PBKDF2_HASH_BYTES = 32
+
+
+def _hash_master_pbkdf2(password, salt_hex=None, iterations=MASTER_PBKDF2_ITERATIONS):
+    salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(MASTER_PBKDF2_SALT_BYTES)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations, MASTER_PBKDF2_HASH_BYTES)
+    return f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}"
+
+
+def _verify_master(password, stored_hash, legacy_salt=None):
+    if not stored_hash or not isinstance(stored_hash, str):
+        return False
+    if stored_hash.startswith("pbkdf2_sha256$"):
+        parts = stored_hash.split("$")
+        if len(parts) != 4:
+            return False
+        try:
+            iterations = int(parts[1])
+        except ValueError:
+            return False
+        candidate = _hash_master_pbkdf2(password, parts[2], iterations)
+        return hmac.compare_digest(candidate.split("$")[3], parts[3])
+    # Ancien format : hash SHA-256 + sel séparé.
+    if legacy_salt is None:
+        return False
+    digest = hashlib.sha256((legacy_salt + password).encode("utf-8")).hexdigest()
+    return hmac.compare_digest(digest, stored_hash)
 
 
 def get_license_path():
@@ -50,23 +87,35 @@ def master_password_is_set():
 
 
 def set_master_password(password):
-    salt = secrets.token_hex(16)
-    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    """Définit (ou redéfinit) le mot de passe maître, haché en PBKDF2."""
+    password_hash = _hash_master_pbkdf2(password)
     with open(get_master_path(), "w", encoding="utf-8") as fh:
-        json.dump({"salt": salt, "hash": digest}, fh)
+        json.dump({"algo": "pbkdf2_sha256", "hash": password_hash}, fh)
 
 
 def check_master_password(password):
+    """Vérifie le mot de passe maître (PBKDF2 ou ancien SHA-256). En cas de
+    succès sur un ancien hachage, le re-hache transparentement en PBKDF2."""
     path = get_master_path()
     if not os.path.exists(path):
         return False
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        digest = hashlib.sha256((data["salt"] + password).encode("utf-8")).hexdigest()
-        return hmac.compare_digest(digest, data["hash"])
     except Exception:
+        logger.warning("Échec de lecture du fichier de mot de passe maître: %s", path, exc_info=True)
         return False
+    stored_hash = data.get("hash")
+    legacy_salt = data.get("salt")
+    if not _verify_master(password, stored_hash, legacy_salt=legacy_salt):
+        return False
+    # Mise à niveau : ancien format SHA-256 → PBKDF2.
+    if isinstance(stored_hash, str) and not stored_hash.startswith("pbkdf2_sha256$"):
+        try:
+            set_master_password(password)
+        except Exception:
+            logger.warning("Échec de la mise à niveau du hachage du mot de passe maître", exc_info=True)
+    return True
 
 
 # --------------------------------------------------------------- jetons de licence
@@ -88,7 +137,7 @@ def generate_license_token(duration_days=DEFAULT_DURATION_DAYS, label=""):
 
 def _decode_token(token):
     try:
-        raw = token.replace("-", "").replace(" ", "")
+        raw = token.replace("-", "").replace(" ", "").replace("\n", "")
         decoded = base64.urlsafe_b64decode(raw.encode("utf-8")).decode("utf-8")
         expiry, label, signature = decoded.split("|")
         expected = _sign(f"{expiry}|{label}")
@@ -96,6 +145,9 @@ def _decode_token(token):
             return None
         return {"expiry": expiry, "label": label}
     except Exception:
+        # Échec attendu sur jeton malformé (saisie utilisateur) : on reste
+        # silencieux à ce niveau (appelé très souvent) mais on ne masque pas
+        # pour autant une exception inattendue côté appelant.
         return None
 
 
@@ -121,6 +173,7 @@ def get_current_token():
             data = json.load(fh)
         return data.get("token")
     except Exception:
+        logger.warning("Échec de lecture du fichier de licence: %s", path, exc_info=True)
         return None
 
 
@@ -141,4 +194,5 @@ def check_license():
             return {"valid": False, "reason": "expired", "expiry": parsed["expiry"], "days_left": days_left, "label": parsed["label"]}
         return {"valid": True, "reason": "ok", "expiry": parsed["expiry"], "days_left": days_left, "label": parsed["label"]}
     except Exception:
+        logger.warning("Erreur lors de la vérification de la licence: %s", path, exc_info=True)
         return {"valid": False, "reason": "error", "expiry": None, "days_left": None, "label": None}
