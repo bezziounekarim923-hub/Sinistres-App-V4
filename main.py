@@ -2118,9 +2118,19 @@ class FicheSinistreDialog(tk.Toplevel):
         header.pack(fill="x")
         tk.Label(header, text="FICHE DE SINISTRE", bg=COLOR_PRIMARY, fg="white",
                  font=("Segoe UI", 16, "bold")).pack(pady=(10, 2))
-        sub = f"N° code CAM : {data.get('code_cam') or '—'}    —    Fiche de sinistre {fiche_num}"
+        sub = f"N° code CAM : {data.get('code_cam') or '—'}    —    fiche de sinistre {fiche_num}"
         tk.Label(header, text=sub, bg=COLOR_PRIMARY, fg="#dbe4f0",
-                 font=("Segoe UI", 10)).pack(pady=(0, 10))
+                 font=("Segoe UI", 10)).pack(pady=(0, 8))
+
+        # ---- Organisme (éditable, persisté) ----
+        org_row = tk.Frame(self, bg=COLOR_BG)
+        org_row.pack(fill="x", padx=16, pady=(8, 2))
+        tk.Label(org_row, text="Organisme (en-tête de la fiche) :",
+                 bg=COLOR_BG, fg=COLOR_PRIMARY,
+                 font=("Segoe UI", 9, "bold")).pack(side="left")
+        self.entry_organism = ttk.Entry(org_row, width=42)
+        self.entry_organism.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        self.entry_organism.insert(0, data.get("organism_name", ""))
 
         # ---- Corps : champs éditables ----
         body = tk.Frame(self, bg=COLOR_CARD)
@@ -2157,12 +2167,19 @@ class FicheSinistreDialog(tk.Toplevel):
         ttk.Button(actions, text="Fermer", command=self.destroy).pack(side="right", padx=4)
 
     def _collect_data(self):
-        """Récupère les valeurs (éditées) des champs sous forme de dict de fiche."""
+        """Récupère les valeurs (éditées) des champs sous forme de dict de fiche.
+        Persiste le nom de l'organisme (modifiable) pour les prochaines fiches."""
         data = {}
         for fiche_key, _label, _db_key in fiche.FICHE_FIELD_MAPPING:
             widget = self.entries.get(fiche_key)
             value = widget.get().strip() if widget is not None else ""
             data[fiche_key] = value
+        organism = ""
+        if hasattr(self, "entry_organism"):
+            organism = self.entry_organism.get().strip()
+            if organism and organism != fiche.get_organism_name():
+                fiche.set_organism_name(organism)  # persistance pour les prochaines fiches
+        data["organism_name"] = organism or fiche.get_organism_name()
         data["code_cam"] = (self.record.get("code_cam") or "").strip()
         data["fiche_number"] = fiche.fiche_number(self.record)
         return data

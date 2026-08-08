@@ -150,6 +150,11 @@ class BuildPdfTests(unittest.TestCase):
         fiche.build_fiche_pdf(data, out)
         txt = pypdf.PdfReader(out).pages[0].extract_text()
         self.assertIn("FICHE DE SINISTRE", txt)
+        # En-tête organisme du modèle officiel.
+        self.assertIn("TERRENO TRANS", txt)
+        # Libellés conformes au modèle.
+        self.assertIn("Y a-t-il un pv des autorités", txt)
+        self.assertIn("Si oui les copies des documents sont-ils récupérés", txt)
         self.assertIn("Mohamed X", txt)
         self.assertIn("Gendarmerie nationale", txt)
         self.assertIn("123456-16", txt)
@@ -157,6 +162,17 @@ class BuildPdfTests(unittest.TestCase):
         self.assertIn("Signature du responsable", txt)
         # Numéro de fiche dynamique (n° 7/2026), pas le 0/2026 du modèle.
         self.assertIn("n° 7/2026", txt)
+
+    @unittest.skipUnless(_HAS_PYPDF, "pypdf non installé (dépendance de test)")
+    def test_organism_name_configurable(self):
+        """Le nom de l'organisme affiché provient des données de la fiche
+        (donc modifiable par l'utilisateur)."""
+        data, _ = self._data()
+        data["organism_name"] = "Autre Société SARL"
+        out = os.path.join(self.tmp, "f_org.pdf")
+        fiche.build_fiche_pdf(data, out)
+        txt = pypdf.PdfReader(out).pages[0].extract_text()
+        self.assertIn("Autre Société SARL", txt)
 
     @unittest.skipUnless(_HAS_PYPDF, "pypdf non installé (dépendance de test)")
     def test_missing_data_not_invented_in_pdf(self):

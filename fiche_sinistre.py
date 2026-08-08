@@ -20,6 +20,7 @@ remplir manuellement après impression).
 import os
 import re
 import sys
+import json
 import datetime
 
 from reportlab.lib.pagesizes import A4
@@ -28,9 +29,57 @@ from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib import colors
 
 import date_utils
+import database as db
 
 # N° de version du modèle de fiche (au cas où le format évolue).
 FICHE_TEMPLATE_VERSION = 1
+
+# Organisme affiché en en-tête de la fiche (modifiable par l'utilisateur via
+# l'écran de génération, et persisté dans fiche_config.json). Valeur par défaut
+# conforme au modèle officiel fourni.
+ORGANISM_NAME = "Eurl TERRENO TRANS"
+FICHE_CONFIG_FILE = "fiche_config.json"
+
+
+def get_fiche_config_path():
+    return os.path.join(db.get_app_dir(), FICHE_CONFIG_FILE)
+
+
+def load_fiche_config():
+    """Charge la config de la fiche (nom de l'organisme, ...). Defaults sensés."""
+    path = get_fiche_config_path()
+    if not os.path.exists(path):
+        return {"organism_name": ORGANISM_NAME}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        data.setdefault("organism_name", ORGANISM_NAME)
+        return data
+    except Exception:
+        return {"organism_name": ORGANISM_NAME}
+
+
+def save_fiche_config(config):
+    path = get_fiche_config_path()
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(config, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def get_organism_name():
+    """Nom de l'organisme à afficher en en-tête (persisté, défaut TERRENO TRANS)."""
+    return (load_fiche_config().get("organism_name") or "").strip() or ORGANISM_NAME
+
+
+def set_organism_name(name):
+    """Persiste le nom de l'organisme. Retourne la valeur effectivement stockée."""
+    config = load_fiche_config()
+    config["organism_name"] = (name or "").strip() or ORGANISM_NAME
+    save_fiche_config(config)
+    return config["organism_name"]
+
 
 # Correspondance champs de la fiche <-> colonnes réelles de la base.
 # (clé_fiche, libellé affiché, colonne_base)
@@ -40,11 +89,11 @@ FICHE_FIELD_MAPPING = [
     ("lieu_accident", "Lieu d'accident", "lieu_accident"),
     ("immatriculation", "Matricule du véhicule", "immatriculation"),
     ("chauffeur", "Nom et prénom du chauffeur", "chauffeur"),
-    ("pv_recu", "Y a-t-il un PV des autorités", "pv_recu"),
+    ("pv_recu", "Y a-t-il un pv des autorités", "pv_recu"),
     ("autorite_pv", "Si oui, quelle autorité", "autorite_pv"),
     ("adresse_autorite", "Adresse de l'autorité", "adresse_autorite"),
     ("avec_sans_tiers", "Avec ou sans tiers", "avec_sans_tiers"),
-    ("documents_recuperes", "Si oui, copies des documents récupérées", "documents_recuperes"),
+    ("documents_recuperes", "Si oui les copies des documents sont-ils récupérés", "documents_recuperes"),
     ("degats_cause", "Dégâts causés", "degats_cause"),
     ("circonstance_accident", "Circonstance d'accident", "circonstance_accident"),
 ]
@@ -107,7 +156,8 @@ def record_to_fiche_data(record):
         else:
             text = str(value).strip()
             data[fiche_key] = text
-    # En-tête de la fiche : N° code CAM + numéro de fiche.
+    # En-tête de la fiche : organisme + N° code CAM + numéro de fiche.
+    data["organism_name"] = get_organism_name()
     data["code_cam"] = str(record.get("code_cam") or "").strip()
     data["fiche_number"] = fiche_number(record)
     return data
@@ -130,23 +180,33 @@ def build_fiche_pdf(data, output_path):
     margin_x = 18 * mm
     y = height - 18 * mm
 
-    # ---- En-tête : bandeau de titre ----
+    # ---- En-tête : bandeau organisme + titre ----
+    organism = (data.get("organism_name") or "").strip()
+    banner_h = 22 * mm if organism else 16 * mm
     c.setFillColor(colors.HexColor("#1f3a5f"))
-    c.rect(margin_x, y - 16 * mm, width - 2 * margin_x, 16 * mm, fill=1, stroke=0)
+    c.rect(margin_x, y - banner_h, width - 2 * margin_x, banner_h, fill=1, stroke=0)
     c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawCentredString(width / 2, y - 11 * mm, "FICHE DE SINISTRE")
-    y -= 22 * mm
+    if organism:
+        # Ligne 1 : nom de l'organisme (modèle officiel : « Eurl TERRENO TRANS »).
+        c.setFont("Helvetica-Bold", 13)
+        c.drawCentredString(width / 2, y - 8 * mm, organism)
+        # Ligne 2 : titre du document.
+        c.setFont("Helvetica-Bold", 18)
+        c.drawCentredString(width / 2, y - 17 * mm, "FICHE DE SINISTRE")
+    else:
+        c.setFont("Helvetica-Bold", 18)
+        c.drawCentredString(width / 2, y - 11 * mm, "FICHE DE SINISTRE")
+    y -= banner_h + 6 * mm
 
-    # ---- Sous-en-tête : N° code CAM + n° de fiche ----
+    # ---- Sous-en-tête : N° code CAM + n° de fiche (même ligne que le modèle) ----
     c.setFillColor(colors.HexColor("#1f3a5f"))
     c.setFont("Helvetica-Bold", 11)
     code_cam = (data.get("code_cam") or "").strip()
-    if code_cam:
-        c.drawString(margin_x, y, f"N° code CAM : {code_cam}")
+    # Le libellé « N° code CAM : » est toujours présent (valeur à la suite si connue).
+    c.drawString(margin_x, y, f"N° code CAM : {code_cam}")
     fiche_num = (data.get("fiche_number") or "").strip()
     if fiche_num:
-        c.drawRightString(width - margin_x, y, f"Fiche de sinistre {fiche_num}")
+        c.drawRightString(width - margin_x, y, f"fiche de sinistre {fiche_num}")
     y -= 10 * mm
     c.setStrokeColor(colors.HexColor("#1f3a5f"))
     c.setLineWidth(1.0)

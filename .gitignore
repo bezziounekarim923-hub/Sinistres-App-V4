@@ -22,6 +22,9 @@ sinistres_app.log.*
 # Fiches de sinistre générées (PDF)
 Fiches/
 
+# Config de la fiche (nom de l'organisme, etc.)
+fiche_config.json
+
 # Fichiers de build
 build/
 dist/
