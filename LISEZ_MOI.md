@@ -147,6 +147,53 @@ enregistrer (aucun blocage strict, juste une alerte).
 
 ---
 
+## 📄 Génération de la fiche de sinistre officielle
+
+L'application génère automatiquement la **fiche de sinistre officielle** (PDF A4)
+à partir des données d'un sinistre :
+
+1. Dans l'onglet **Sinistres**, sélectionnez **une ligne**.
+2. Cliquez sur **« 📄 Générer la fiche »**.
+3. Un écran de **prévisualisation modifiable** s'ouvre, pré-rempli avec les
+   informations du sinistre (date, lieu, matricule, chauffeur, PV, autorité,
+   tiers, dégâts, circonstances…).
+4. **Vérifiez / corrigez** les champs si besoin.
+5. Choisissez l'action :
+   - **« 💾 Enregistrer PDF »** : enregistre un PDF professionnel (vous choisissez
+     l'emplacement ; par défaut un dossier `Fiches/` à côté de l'application).
+   - **« 🖨 Imprimer »** : génère le PDF puis ouvre la boîte d'impression Windows.
+   - **« 📥 Enregistrer dans le sinistre »** (Administrateur / Gestionnaire) :
+     reporte les corrections dans le sinistre en base.
+
+⚠️ **Important** : corriger un champ dans la fiche **ne modifie pas** le sinistre
+en base. La fiche est un document indépendant. Pour reporter les changements
+dans le sinistre, il faut cliquer explicitement « Enregistrer dans le sinistre ».
+
+Le **numéro de fiche** est généré dynamiquement à partir du numéro et de l'année
+réels du sinistre (ex. `n° 9/2026`), jamais la valeur d'exemple `0/2026`.
+
+Les informations **absentes** de la base restent vides sur la fiche (ligne à
+compléter manuellement) — l'application n'invente jamais de valeur.
+
+### Champs spécifiques à la fiche ajoutés au formulaire
+
+Pour que la fiche soit remplie au maximum, trois champs ont été ajoutés au
+formulaire d'ajout/modification (et à la base) :
+
+- **Autorité du PV** (ex. Gendarmerie nationale, Police…)
+- **Adresse de l'autorité**
+- **Copies des documents récupérées** (OUI / NON)
+
+Si votre fichier Excel contient déjà des colonnes correspondantes, elles sont
+importées automatiquement.
+
+### Dépendance supplémentaire
+
+La génération PDF utilise **reportlab**. Si vous aviez déjà installé
+l'application, **relancez `1_installer.bat` une fois** pour ajouter reportlab.
+
+---
+
 ## 🕑 Journal des opérations et tableau de bord Administration
 
 Le menu **Administration** propose :

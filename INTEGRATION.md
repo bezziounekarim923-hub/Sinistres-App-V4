@@ -110,6 +110,11 @@ Une fois en place, les tests tourneront automatiquement à chaque push/PR.
 
 ## 4. APRÈS l'intégration — vérifications rapides
 
+⚠️ **Nouvelle dépendance** : la génération de la fiche de sinistre utilise
+**reportlab**. Relancez **`1_installer.bat` une fois** après la mise à jour pour
+l'installer (si vous lancez l'app via Python). Pour le `.exe`, reportlab est
+inclus automatiquement par `3_creer_exe.bat`.
+
 Lance l'application et vérifie ces points :
 
 - [ ] **Connexion** : ton compte habituel fonctionne toujours (le mot de passe est re-haché en silence à la 1re connexion).

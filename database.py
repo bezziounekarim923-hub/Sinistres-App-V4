@@ -127,9 +127,11 @@ CREATE TABLE IF NOT EXISTS sinistres (
     type_accident TEXT,
     degats_cause TEXT,
     avec_sans_tiers TEXT,
+    autorite_pv TEXT,
+    adresse_autorite TEXT,
+    documents_recuperes TEXT,
     fautif TEXT,
-    visa_reparation TEXT,
-    expertise TEXT,
+    visa_reparation TEXT,    expertise TEXT,
     date_expertise TEXT,
     pv_recu TEXT,
     date_reception_pv TEXT,
@@ -172,7 +174,8 @@ CREATE INDEX IF NOT EXISTS idx_statut ON sinistres(statut_reglement);
 COLUMNS = [
     "annee", "numero", "code_cam", "type_vehicule", "date_sinistre",
     "date_declaration", "lieu_accident", "immatriculation", "chauffeur",
-    "type_accident", "degats_cause", "avec_sans_tiers", "fautif",
+    "type_accident", "degats_cause", "avec_sans_tiers",
+    "autorite_pv", "adresse_autorite", "documents_recuperes", "fautif",
     "visa_reparation", "expertise", "date_expertise", "pv_recu",
     "date_reception_pv", "delai_pv_jours", "confirmation_pv",
     "date_confirmation_pv", "numero_dossier", "montant_pv_expert", "montant_achats",
@@ -260,6 +263,9 @@ def ensure_schema():
                 conn.execute(f"ALTER TABLE sinistres ADD COLUMN {optional_col} TEXT")
         if "montant_achats" not in cols:
             conn.execute("ALTER TABLE sinistres ADD COLUMN montant_achats REAL")
+        for fiche_col in ("autorite_pv", "adresse_autorite", "documents_recuperes"):
+            if fiche_col not in cols:
+                conn.execute(f"ALTER TABLE sinistres ADD COLUMN {fiche_col} TEXT")
 
         if "created_at" not in cols:
             conn.execute("ALTER TABLE sinistres ADD COLUMN created_at TEXT")

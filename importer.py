@@ -85,6 +85,14 @@ HEADER_MAP = {
     "nomducamion": "camion",
     "assure": "assure",
     "assurer": "assure",
+    # Champs spécifiques à la fiche de sinistre (fiche officielle).
+    "autoritedupv": "autorite_pv",
+    "autorite": "autorite_pv",
+    "quelleautorite": "autorite_pv",
+    "adressedelautorite": "adresse_autorite",
+    "adresseautorite": "adresse_autorite",
+    "copiesdesdocumentsrecuperes": "documents_recuperes",
+    "documentsrecuperes": "documents_recuperes",
 }
 
 REQUIRED_HEADER_HINTS = ["datedusinistre", "lieudaccident", "nomprenomdechauff", "nomprenomduchauffeur"]

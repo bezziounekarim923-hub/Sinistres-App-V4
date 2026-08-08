@@ -19,6 +19,9 @@ last_import_path.txt
 sinistres_app.log
 sinistres_app.log.*
 
+# Fiches de sinistre générées (PDF)
+Fiches/
+
 # Fichiers de build
 build/
 dist/
