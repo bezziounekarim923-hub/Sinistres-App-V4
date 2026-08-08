@@ -146,12 +146,18 @@ class BuildPdfTests(unittest.TestCase):
     @unittest.skipUnless(_HAS_PYPDF, "pypdf non installé (dépendance de test)")
     def test_pdf_contains_expected_info(self):
         data, _ = self._data()
+        # Force le letterhead du modèle officiel (indépendant de la config machine).
+        data["letterhead"] = list(fiche.FICHE_LETTERHEAD_DEFAULT)
         out = os.path.join(self.tmp, "f.pdf")
         fiche.build_fiche_pdf(data, out)
         txt = pypdf.PdfReader(out).pages[0].extract_text()
         self.assertIn("FICHE DE SINISTRE", txt)
-        # En-tête organisme du modèle officiel.
+        # En-tête organisme complet du modèle officiel.
         self.assertIn("TERRENO TRANS", txt)
+        self.assertIn("021/2015", txt)  # agrément du Ministère des Finances
+        self.assertIn("GF courtage", txt)
+        self.assertIn("05 55 34 82 24", txt)  # mobile
+        self.assertIn("gfcourtage2015@gmail.com", txt)  # e-mail
         # Libellés conformes au modèle.
         self.assertIn("Y a-t-il un pv des autorités", txt)
         self.assertIn("Si oui les copies des documents sont-ils récupérés", txt)
@@ -164,15 +170,30 @@ class BuildPdfTests(unittest.TestCase):
         self.assertIn("n° 7/2026", txt)
 
     @unittest.skipUnless(_HAS_PYPDF, "pypdf non installé (dépendance de test)")
-    def test_organism_name_configurable(self):
-        """Le nom de l'organisme affiché provient des données de la fiche
-        (donc modifiable par l'utilisateur)."""
+    def test_letterhead_configurable(self):
+        """L'en-tête organisme affiché provient des données de la fiche
+        (donc modifiable par l'utilisateur, ligne par ligne)."""
         data, _ = self._data()
-        data["organism_name"] = "Autre Société SARL"
+        data["letterhead"] = ["Autre Société SARL", "12 rue Exemple, Alger"]
         out = os.path.join(self.tmp, "f_org.pdf")
         fiche.build_fiche_pdf(data, out)
         txt = pypdf.PdfReader(out).pages[0].extract_text()
         self.assertIn("Autre Société SARL", txt)
+        self.assertIn("12 rue Exemple, Alger", txt)
+
+    @unittest.skipUnless(_HAS_PYPDF, "pypdf non installé (dépendance de test)")
+    def test_multiline_fields_wrap_in_pdf(self):
+        """Les champs dégâts et circonstances (texte multiligne) doivent
+        apparaître intégralement dans le PDF, non tronqués par '...'."""
+        long_degats = "Pare-chocs avant endommage, capot plie, optique gauche brisee, calandre deforme et radiateur touche."
+        data, _ = self._data(degats_cause=long_degats)
+        data["letterhead"] = ["Org"]
+        out = os.path.join(self.tmp, "f_ml.pdf")
+        fiche.build_fiche_pdf(data, out)
+        txt = pypdf.PdfReader(out).pages[0].extract_text()
+        # Le début et la fin du texte long doivent être présents (pas tronqué).
+        self.assertIn("Pare-chocs avant endommage", txt)
+        self.assertIn("radiateur touche", txt)
 
     @unittest.skipUnless(_HAS_PYPDF, "pypdf non installé (dépendance de test)")
     def test_missing_data_not_invented_in_pdf(self):

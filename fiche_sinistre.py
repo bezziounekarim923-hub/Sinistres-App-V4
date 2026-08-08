@@ -34,11 +34,26 @@ import database as db
 # N° de version du modèle de fiche (au cas où le format évolue).
 FICHE_TEMPLATE_VERSION = 1
 
-# Organisme affiché en en-tête de la fiche (modifiable par l'utilisateur via
-# l'écran de génération, et persisté dans fiche_config.json). Valeur par défaut
-# conforme au modèle officiel fourni.
+# En-tête officiel de l'organisme affiché en haut de la fiche (modifiable par
+# l'utilisateur via l'écran de génération, persisté dans fiche_config.json).
+# Valeurs par défaut conformes au modèle fourni (FICHE DE SINISTRE PDF.doc).
+FICHE_LETTERHEAD_DEFAULT = [
+    "Assistance, Conseil et Orientation",
+    "Agrément du Ministère des Finances N° 021/2015",
+    "Eurl TERRENO TRANS",
+    "GF courtage",
+    "Bd Mohamed KHEMISTI Dar El Beida",
+    "Cité 600 logts Sétif",
+    "Mobile : 05 55 34 82 24",
+    "E-mail : gfcourtage2015@gmail.com",
+]
+# Compatibilité ascendante : ancienne clé single-line « organism_name ».
 ORGANISM_NAME = "Eurl TERRENO TRANS"
 FICHE_CONFIG_FILE = "fiche_config.json"
+
+# Champs de la fiche rendus en texte multiligne (dégâts, circonstances) :
+# affichage sur plusieurs lignes dans le PDF et widget Text dans le dialog.
+MULTILINE_FIELDS = {"degats_cause", "circonstance_accident"}
 
 
 def get_fiche_config_path():
@@ -46,17 +61,22 @@ def get_fiche_config_path():
 
 
 def load_fiche_config():
-    """Charge la config de la fiche (nom de l'organisme, ...). Defaults sensés."""
+    """Charge la config de la fiche (en-tête organisme, ...). Defaults sensés."""
     path = get_fiche_config_path()
     if not os.path.exists(path):
-        return {"organism_name": ORGANISM_NAME}
+        return {"letterhead": list(FICHE_LETTERHEAD_DEFAULT)}
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        data.setdefault("organism_name", ORGANISM_NAME)
+        # Rétro-compat : ancienne config « organism_name » (une ligne) -> letterhead.
+        if "letterhead" not in data and data.get("organism_name"):
+            data["letterhead"] = [data["organism_name"]]
+        data.setdefault("letterhead", list(FICHE_LETTERHEAD_DEFAULT))
+        if not isinstance(data["letterhead"], list) or not data["letterhead"]:
+            data["letterhead"] = list(FICHE_LETTERHEAD_DEFAULT)
         return data
     except Exception:
-        return {"organism_name": ORGANISM_NAME}
+        return {"letterhead": list(FICHE_LETTERHEAD_DEFAULT)}
 
 
 def save_fiche_config(config):
@@ -68,9 +88,29 @@ def save_fiche_config(config):
         pass
 
 
+def get_letterhead():
+    """Liste des lignes de l'en-tête organisme (persistée, défaut = modèle)."""
+    lines = load_fiche_config().get("letterhead") or []
+    return [str(ln).strip() for ln in lines if str(ln).strip()] or list(FICHE_LETTERHEAD_DEFAULT)
+
+
+def set_letterhead(lines):
+    """Persiste les lignes de l'en-tête organisme. Retourne la liste stockée."""
+    cleaned = [str(ln).strip() for ln in (lines or []) if str(ln).strip()]
+    if not cleaned:
+        cleaned = list(FICHE_LETTERHEAD_DEFAULT)
+    config = load_fiche_config()
+    config["letterhead"] = cleaned
+    # Nettoie l'ancienne clé legacy pour éviter une divergence.
+    config.pop("organism_name", None)
+    save_fiche_config(config)
+    return cleaned
+
+
 def get_organism_name():
-    """Nom de l'organisme à afficher en en-tête (persisté, défaut TERRENO TRANS)."""
-    return (load_fiche_config().get("organism_name") or "").strip() or ORGANISM_NAME
+    """Rétro-compat : 1re ligne non vide de l'en-tête (ou défaut TERRENO TRANS)."""
+    lines = get_letterhead()
+    return lines[0] if lines else ORGANISM_NAME
 
 
 def set_organism_name(name):
@@ -156,8 +196,8 @@ def record_to_fiche_data(record):
         else:
             text = str(value).strip()
             data[fiche_key] = text
-    # En-tête de la fiche : organisme + N° code CAM + numéro de fiche.
-    data["organism_name"] = get_organism_name()
+    # En-tête de la fiche : bloc organisme + N° code CAM + numéro de fiche.
+    data["letterhead"] = get_letterhead()
     data["code_cam"] = str(record.get("code_cam") or "").strip()
     data["fiche_number"] = fiche_number(record)
     return data
@@ -180,22 +220,36 @@ def build_fiche_pdf(data, output_path):
     margin_x = 18 * mm
     y = height - 18 * mm
 
-    # ---- En-tête : bandeau organisme + titre ----
-    organism = (data.get("organism_name") or "").strip()
-    banner_h = 22 * mm if organism else 16 * mm
+    # ---- En-tête : bloc organisme (multi-lignes) + bandeau titre ----
+    letterhead = data.get("letterhead") or []
+    if isinstance(letterhead, str):
+        letterhead = [ln for ln in letterhead.splitlines() if ln.strip()]
+    # Rend le bloc organisme centré, police fine, au-dessus du bandeau titre.
+    if letterhead:
+        c.setFillColor(colors.HexColor("#1f3a5f"))
+        c.setFont("Helvetica", 8.5)
+        line_h = 3.6 * mm
+        block_h = len(letterhead) * line_h
+        for i, ln in enumerate(letterhead):
+            # Surligne le nom de société (3e ligne par défaut) en gras.
+            is_company = (i == 2)
+            c.setFont("Helvetica-Bold", 11 if is_company else 8.5)
+            c.drawCentredString(width / 2, y - line_h * (i + 1) + 0.5 * mm, ln)
+            c.setFont("Helvetica", 8.5)
+        y -= block_h + 3 * mm
+        # Filet de séparation sous l'en-tête organisme.
+        c.setStrokeColor(colors.HexColor("#1f3a5f"))
+        c.setLineWidth(0.6)
+        c.line(margin_x, y, width - margin_x, y)
+        y -= 5 * mm
+
+    # Bandeau de titre « FICHE DE SINISTRE ».
+    banner_h = 12 * mm
     c.setFillColor(colors.HexColor("#1f3a5f"))
     c.rect(margin_x, y - banner_h, width - 2 * margin_x, banner_h, fill=1, stroke=0)
     c.setFillColor(colors.white)
-    if organism:
-        # Ligne 1 : nom de l'organisme (modèle officiel : « Eurl TERRENO TRANS »).
-        c.setFont("Helvetica-Bold", 13)
-        c.drawCentredString(width / 2, y - 8 * mm, organism)
-        # Ligne 2 : titre du document.
-        c.setFont("Helvetica-Bold", 18)
-        c.drawCentredString(width / 2, y - 17 * mm, "FICHE DE SINISTRE")
-    else:
-        c.setFont("Helvetica-Bold", 18)
-        c.drawCentredString(width / 2, y - 11 * mm, "FICHE DE SINISTRE")
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width / 2, y - 8 * mm, "FICHE DE SINISTRE")
     y -= banner_h + 6 * mm
 
     # ---- Sous-en-tête : N° code CAM + n° de fiche (même ligne que le modèle) ----
@@ -214,17 +268,34 @@ def build_fiche_pdf(data, output_path):
     y -= 9 * mm
 
     # ---- Corps : champs libellé + valeur soulignée ----
+    import textwrap as _textwrap
     c.setFillColor(colors.black)
     label_font = "Helvetica-Bold"
     value_font = "Helvetica"
     field_height = 8.5 * mm
+    multiline_height = 5.2 * mm  # hauteur d'une ligne supplémentaire (champs multilignes)
     value_underline_gap = 3.2 * mm
 
     for fiche_key, label, _db_key in FICHE_FIELD_MAPPING:
-        if y < 60 * mm:  # marge basse pour les signatures
-            break
         raw_value = data.get(fiche_key)
         value = "" if _is_blank(raw_value) else str(raw_value).strip()
+        is_multiline = fiche_key in MULTILINE_FIELDS
+
+        # Estimation de la hauteur nécessaire (multiligne -> plusieurs lignes).
+        value_x = margin_x + 68 * mm
+        value_w = width - margin_x - value_x
+        avg_char_w = c.stringWidth("x", value_font, 11)
+        chars_per_line = max(1, int(value_w / avg_char_w)) if avg_char_w else 60
+        if is_multiline and value:
+            wrapped = _textwrap.wrap(value, width=chars_per_line)
+            n_lines = len(wrapped) if wrapped else 1
+            needed_h = multiline_height * max(n_lines, 1) + 1.5 * mm
+        else:
+            n_lines = 1
+            needed_h = field_height
+
+        if y - needed_h < 55 * mm:  # marge basse pour les signatures
+            break
 
         # Libellé (colonne gauche, gras).
         c.setFont(label_font, 10)
@@ -237,24 +308,28 @@ def build_fiche_pdf(data, output_path):
         else:
             c.drawString(margin_x, label_y + 4, label + " :")
 
-        # Valeur (à droite du libellé, soulignée pour ressembler à un formulaire).
+        # Valeur (à droite du libellé). Multiligne : retour à la ligne automatique.
         c.setFont(value_font, 11)
         c.setFillColor(colors.black)
-        value_x = margin_x + 68 * mm
-        value_w = width - margin_x - value_x
-        # Tronque la valeur si trop longue pour la ligne (au pire, coupe visuellement).
         if value:
-            display = value
-            while c.stringWidth(display, value_font, 11) > value_w and len(display) > 5:
-                display = display[:-2]
-            if display != value:
-                display = display[:-1] + "…"
-            c.drawString(value_x, label_y, display)
-        # Trait de soulignement (ligne à remplir si vide).
+            if is_multiline:
+                wrapped = _textwrap.wrap(value, width=chars_per_line) or [value]
+                for li, line in enumerate(wrapped[:6]):  # limite à 6 lignes visuelles
+                    c.drawString(value_x, label_y - li * multiline_height, line)
+            else:
+                # Tronque la valeur si trop longue pour la ligne.
+                display = value
+                while c.stringWidth(display, value_font, 11) > value_w and len(display) > 5:
+                    display = display[:-2]
+                if display != value:
+                    display = display[:-1] + "…"
+                c.drawString(value_x, label_y, display)
+        # Trait de soulignement (ligne à remplir si vide), sous la dernière ligne.
         c.setStrokeColor(colors.HexColor("#888888"))
         c.setLineWidth(0.5)
-        c.line(value_x, label_y - value_underline_gap, width - margin_x, label_y - value_underline_gap)
-        y -= field_height
+        underline_y = label_y - value_underline_gap - ((n_lines - 1) * multiline_height if is_multiline else 0)
+        c.line(value_x, underline_y, width - margin_x, underline_y)
+        y -= needed_h
 
     # ---- Zones de signature (deux cadres côte à côte) ----
     sig_box_h = 22 * mm

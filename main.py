@@ -2122,34 +2122,51 @@ class FicheSinistreDialog(tk.Toplevel):
         tk.Label(header, text=sub, bg=COLOR_PRIMARY, fg="#dbe4f0",
                  font=("Segoe UI", 10)).pack(pady=(0, 8))
 
-        # ---- Organisme (éditable, persisté) ----
-        org_row = tk.Frame(self, bg=COLOR_BG)
-        org_row.pack(fill="x", padx=16, pady=(8, 2))
-        tk.Label(org_row, text="Organisme (en-tête de la fiche) :",
+        # ---- En-tête organisme (éditable multi-lignes, persisté) ----
+        org_frame = tk.Frame(self, bg=COLOR_BG)
+        org_frame.pack(fill="x", padx=16, pady=(8, 2))
+        tk.Label(org_frame, text="En-tête organisme de la fiche (une ligne par ligne) :",
                  bg=COLOR_BG, fg=COLOR_PRIMARY,
-                 font=("Segoe UI", 9, "bold")).pack(side="left")
-        self.entry_organism = ttk.Entry(org_row, width=42)
-        self.entry_organism.pack(side="left", fill="x", expand=True, padx=(6, 0))
-        self.entry_organism.insert(0, data.get("organism_name", ""))
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        self.txt_letterhead = tk.Text(org_frame, height=6, width=60, wrap="word",
+                                      font=("Segoe UI", 9))
+        self.txt_letterhead.pack(fill="x", padx=(0, 0), pady=(2, 6))
+        letterhead = data.get("letterhead") or fiche.get_letterhead()
+        self.txt_letterhead.insert("1.0", "\n".join(letterhead))
 
         # ---- Corps : champs éditables ----
         body = tk.Frame(self, bg=COLOR_CARD)
         body.pack(fill="both", expand=True, padx=16, pady=12)
 
         for fiche_key, label, _db_key in fiche.FICHE_FIELD_MAPPING:
+            value = data.get(fiche_key, "")
+            is_multiline = fiche_key in fiche.MULTILINE_FIELDS
             row = tk.Frame(body, bg=COLOR_CARD)
             row.pack(fill="x", padx=6, pady=5)
-            tk.Label(row, text=label + " :", width=34, anchor="w",
-                     bg=COLOR_CARD, fg=COLOR_PRIMARY,
-                     font=("Segoe UI", 9, "bold")).pack(side="left")
-            value = data.get(fiche_key, "")
-            if fiche_key in fiche.CHOICE_FIELDS:
+            if is_multiline:
+                # Champ multiligne (dégâts, circonstances) : libellé au-dessus,
+                # zone de texte sur 3 lignes en dessous.
+                tk.Label(row, text=label + " :", width=60, anchor="w",
+                         bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                         font=("Segoe UI", 9, "bold")).pack(side="top", anchor="w")
+                entry = tk.Text(row, height=3, width=60, wrap="word",
+                                font=("Segoe UI", 10))
+                entry.pack(side="top", fill="x", expand=True, pady=(2, 0))
+                if value:
+                    entry.insert("1.0", value)
+            elif fiche_key in fiche.CHOICE_FIELDS:
+                tk.Label(row, text=label + " :", width=34, anchor="w",
+                         bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                         font=("Segoe UI", 9, "bold")).pack(side="left")
                 choices = list(fiche.CHOICE_FIELDS[fiche_key])
                 entry = ttk.Combobox(row, values=choices, state="normal", width=40)
                 if value:
                     entry.set(value)
                 entry.pack(side="left", fill="x", expand=True)
             else:
+                tk.Label(row, text=label + " :", width=34, anchor="w",
+                         bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                         font=("Segoe UI", 9, "bold")).pack(side="left")
                 entry = ttk.Entry(row, width=42)
                 entry.pack(side="left", fill="x", expand=True)
                 if value:
@@ -2168,18 +2185,29 @@ class FicheSinistreDialog(tk.Toplevel):
 
     def _collect_data(self):
         """Récupère les valeurs (éditées) des champs sous forme de dict de fiche.
-        Persiste le nom de l'organisme (modifiable) pour les prochaines fiches."""
+        Persiste l'en-tête organisme (modifiable) pour les prochaines fiches."""
         data = {}
         for fiche_key, _label, _db_key in fiche.FICHE_FIELD_MAPPING:
             widget = self.entries.get(fiche_key)
-            value = widget.get().strip() if widget is not None else ""
-            data[fiche_key] = value
-        organism = ""
-        if hasattr(self, "entry_organism"):
-            organism = self.entry_organism.get().strip()
-            if organism and organism != fiche.get_organism_name():
-                fiche.set_organism_name(organism)  # persistance pour les prochaines fiches
-        data["organism_name"] = organism or fiche.get_organism_name()
+            if widget is None:
+                data[fiche_key] = ""
+                continue
+            # Les champs multilignes sont des tk.Text (get("1.0", "end")),
+            # les autres des ttk.Entry/Combobox (get()).
+            if isinstance(widget, tk.Text):
+                data[fiche_key] = widget.get("1.0", "end").strip("\n").strip()
+            else:
+                data[fiche_key] = widget.get().strip()
+        # En-tête organisme (multi-lignes) : persistance si modifié.
+        letterhead = fiche.get_letterhead()
+        if hasattr(self, "txt_letterhead"):
+            raw = self.txt_letterhead.get("1.0", "end").strip()
+            new_lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+            if new_lines and new_lines != letterhead:
+                letterhead = fiche.set_letterhead(new_lines)  # persistance
+            elif not new_lines:
+                letterhead = fiche.get_letterhead()
+        data["letterhead"] = letterhead
         data["code_cam"] = (self.record.get("code_cam") or "").strip()
         data["fiche_number"] = fiche.fiche_number(self.record)
         return data
