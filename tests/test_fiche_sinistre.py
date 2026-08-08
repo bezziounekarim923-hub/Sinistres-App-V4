@@ -364,6 +364,16 @@ class TemplateOverlayTests(unittest.TestCase):
             self.assertIn("Karim TEST", txt)
             self.assertIn("123/2026", txt)
 
+    def test_import_user_word_template_doc_handling(self):
+        import fiche_sinistre_word as f_word
+        with patch.object(db, "get_app_dir", lambda: self.tmp):
+            dummy_docx = os.path.join(self.tmp, "source.docx")
+            with open(dummy_docx, "w") as fh:
+                fh.write("dummy")
+            success, dest, msg = f_word.import_user_word_template(dummy_docx)
+            self.assertTrue(success)
+            self.assertTrue(os.path.exists(dest))
+
 
 if __name__ == "__main__":
     unittest.main()

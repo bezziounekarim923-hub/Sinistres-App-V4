@@ -892,7 +892,7 @@ class App(tk.Tk):
         self.btn_fiche.pack(side="right", padx=4)
         self.btn_load_template = ttk.Button(bar, text="📎 Charger modèle PDF", command=self._load_fiche_template)
         self.btn_load_template.pack(side="right", padx=4)
-        self.btn_word_template = ttk.Button(bar, text="📎 Modèle Word (.docx)", command=self._load_word_template)
+        self.btn_word_template = ttk.Button(bar, text="📎 Modèle Word (.doc / .docx)", command=self._load_word_template)
         self.btn_word_template.pack(side="right", padx=4)
         self.btn_calibrate = ttk.Button(bar, text="📐 Calibrer modèle", command=self._open_template_calibration)
         self.btn_calibrate.pack(side="right", padx=4)
@@ -1105,7 +1105,7 @@ class App(tk.Tk):
         menu.add_command(label="✏ Modifier ce sinistre", command=self._edit_record, state=state_edit)
         menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
         menu.add_command(label="📎 Charger modèle PDF original", command=self._load_fiche_template)
-        menu.add_command(label="📎 Charger modèle Word (.docx)", command=self._load_word_template)
+        menu.add_command(label="📎 Charger modèle Word (.doc / .docx)", command=self._load_word_template)
         menu.add_command(label="📐 Calibrer positions du modèle PDF", command=self._open_template_calibration)
         menu.add_separator()
         menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
@@ -1168,27 +1168,32 @@ class App(tk.Tk):
         TemplateCalibrationDialog(self)
 
     def _load_word_template(self):
-        """Permet de charger le modèle Word (.docx) avec vos balises {{...}}."""
+        """Permet de charger le modèle Word (.doc ou .docx). Si c'est un .doc ancien
+        format, l'application le convertit automatiquement en .docx."""
+        import fiche_sinistre_word as f_word
         path = filedialog.askopenfilename(
             parent=self,
-            title="Sélectionner le modèle Word officiel de la Fiche (.docx)",
-            filetypes=[("Documents Word", "*.docx"), ("Tous les fichiers", "*.*")]
+            title="Sélectionner le modèle officiel Word (.doc ou .docx)",
+            filetypes=[("Documents Word (*.doc, *.docx)", "*.doc;*.docx"),
+                       ("Word 97-2003 (*.doc)", "*.doc"),
+                       ("Word moderne (*.docx)", "*.docx"),
+                       ("Tous les fichiers", "*.*")]
         )
         if not path:
             return
         try:
-            import shutil
-            dest_dir = db.get_app_dir()
-            dest_path = os.path.join(dest_dir, "FICHE_DE_SINISTRE_MODELE.docx")
-            shutil.copy2(path, dest_path)
-            messagebox.showinfo(
-                "Modèle Word chargé avec succès",
-                f"La fiche Word originale a été chargée :\n{dest_path}\n\n"
-                "🎯 SYSTÈME INTELLIGENT ACTIF :\n"
-                "Pour l'utiliser, cliquez sur « 📄 Générer la fiche » puis sur "
-                "« 📝 Enregistrer Word (.docx) ». L'application scannera automatiquement "
-                "votre document et insérera les renseignements du sinistre en face de chaque libellé !"
-            )
+            success, dest_path, msg = f_word.import_user_word_template(path)
+            if success:
+                messagebox.showinfo(
+                    "Modèle Word chargé avec succès",
+                    f"{msg}\n\n"
+                    "🎯 SYSTÈME INTELLIGENT ACTIF :\n"
+                    "Pour l'utiliser, cliquez sur « 📄 Générer la fiche » puis sur "
+                    "« 📝 Enregistrer Word (.docx) ». L'application scannera automatiquement "
+                    "votre document et insérera les renseignements du sinistre en face de chaque libellé !"
+                )
+            else:
+                messagebox.showwarning("Format Word .doc", msg)
         except Exception as e:
             messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle Word :\n{e}")
 
@@ -2493,7 +2498,7 @@ class FicheSinistreDialog(tk.Toplevel):
         ttk.Button(actions, text="💾 Enregistrer PDF", command=self._save_pdf).pack(side="left", padx=4)
         ttk.Button(actions, text="📝 Enregistrer Word (.docx)", command=self._save_word).pack(side="left", padx=4)
         ttk.Button(actions, text="🖨 Imprimer", command=self._print).pack(side="left", padx=4)
-        ttk.Button(actions, text="📎 Modèle Word (.docx)", command=self._load_word_template).pack(side="left", padx=4)
+        ttk.Button(actions, text="📎 Modèle Word (.doc / .docx)", command=self._load_word_template).pack(side="left", padx=4)
         ttk.Button(actions, text="📥 Créer modèle Word (.docx)", command=self._create_word_template).pack(side="left", padx=4)
         ttk.Button(actions, text="📎 Charger modèle original (PDF)", command=self._load_original_template).pack(side="left", padx=4)
         ttk.Button(actions, text="📐 Calibrer modèle", command=self._open_template_calibration).pack(side="left", padx=4)
@@ -2647,31 +2652,35 @@ class FicheSinistreDialog(tk.Toplevel):
         TemplateCalibrationDialog(self)
 
     def _load_word_template(self):
-        """Permet de charger ou créer le modèle de fiche Word (.docx) avec balises {{...}}."""
+        """Permet de charger le modèle Word (.doc ou .docx). Si c'est un .doc ancien
+        format, l'application le convertit automatiquement en .docx."""
         import fiche_sinistre_word as f_word
         path = filedialog.askopenfilename(
             parent=self,
-            title="Sélectionner le modèle Word (.docx) avec vos balises {{...}}",
-            filetypes=[("Documents Word", "*.docx"), ("Tous les fichiers", "*.*")]
+            title="Sélectionner le modèle Word officiel (.doc ou .docx)",
+            filetypes=[("Documents Word (*.doc, *.docx)", "*.doc;*.docx"),
+                       ("Word 97-2003 (*.doc)", "*.doc"),
+                       ("Word moderne (*.docx)", "*.docx"),
+                       ("Tous les fichiers", "*.*")]
         )
         if not path:
             return
         try:
-            import shutil
-            dest_dir = db.get_app_dir()
-            dest_path = os.path.join(dest_dir, "FICHE_DE_SINISTRE_MODELE.docx")
-            shutil.copy2(path, dest_path)
-            messagebox.showinfo(
-                "Modèle Word chargé avec succès",
-                f"Le modèle Word a été enregistré comme référence :\n{dest_path}\n\n"
-                "🎯 SYSTÈME INTELLIGENT ACTIF :\n"
-                "En cliquant sur « 📝 Enregistrer Word (.docx) », l'application scannera "
-                "automatiquement votre document (même SANS balises) et insérera les "
-                "renseignements du sinistre en face de chaque libellé !",
-                parent=self
-            )
+            success, dest_path, msg = f_word.import_user_word_template(path)
+            if success:
+                messagebox.showinfo(
+                    "Modèle Word chargé avec succès",
+                    f"{msg}\n\n"
+                    "🎯 SYSTÈME INTELLIGENT ACTIF :\n"
+                    "En cliquant sur « 📝 Enregistrer Word (.docx) », l'application scannera "
+                    "automatiquement votre document (même SANS balises) et insérera les "
+                    "renseignements du sinistre en face de chaque libellé !",
+                    parent=self
+                )
+            else:
+                messagebox.showwarning("Format Word .doc", msg, parent=self)
         except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible de charger le modèle Word :\n{e}", parent=self)
+            messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle Word :\n{e}", parent=self)
 
     def _create_word_template(self):
         """Génère un modèle Word (.docx) avec toutes les balises {{...}} prêt à être

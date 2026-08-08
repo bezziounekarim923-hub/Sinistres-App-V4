@@ -53,6 +53,77 @@ def word_template_is_available():
     return get_word_template_path() is not None
 
 
+def convert_doc_to_docx(doc_path, dest_dir=None):
+    """Convertit automatiquement un fichier Word 97-2003 (.doc) en format moderne
+    (.docx) via Microsoft Word (win32com) ou LibreOffice/OpenOffice si disponible.
+    Retourne le chemin du fichier .docx généré ou None en cas d'échec."""
+    if dest_dir is None:
+        dest_dir = db.get_app_dir()
+    base_name = os.path.splitext(os.path.basename(doc_path))[0]
+    out_docx = os.path.join(dest_dir, base_name + ".docx")
+    if os.path.abspath(doc_path) == os.path.abspath(out_docx):
+        return out_docx
+
+    # 1. Tentative avec Microsoft Word sous Windows (win32com)
+    try:
+        import win32com.client
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        doc = word.Documents.Open(os.path.abspath(doc_path))
+        doc.SaveAs2(os.path.abspath(out_docx), FileFormat=16)  # 16 = wdFormatXMLDocument (.docx)
+        doc.Close()
+        word.Quit()
+        if os.path.exists(out_docx):
+            return out_docx
+    except Exception as e:
+        logger.debug("win32com conversion doc -> docx failed: %s", e)
+
+    # 2. Tentative avec LibreOffice / OpenOffice en ligne de commande
+    try:
+        import subprocess, shutil
+        executables = ["soffice", "libreoffice",
+                       r"C:\Program Files\LibreOffice\program\soffice.exe",
+                       r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"]
+        for exe in executables:
+            if shutil.which(exe) or os.path.exists(exe):
+                subprocess.run([exe, "--headless", "--convert-to", "docx", doc_path,
+                                "--outdir", dest_dir], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if os.path.exists(out_docx):
+                    return out_docx
+    except Exception as e:
+        logger.debug("LibreOffice conversion doc -> docx failed: %s", e)
+
+    return None
+
+
+def import_user_word_template(src_path):
+    """Importe le fichier Word choisi par l'utilisateur (.doc ou .docx) dans le
+    dossier de données de l'application comme FICHE_DE_SINISTRE_MODELE.docx.
+
+    Si le fichier source est un .doc (Word 97-2003), tente de le convertir en .docx.
+    Retourne (succes: bool, chemin_dest: str, message: str).
+    """
+    import shutil
+    dest_dir = db.get_app_dir()
+    dest_path = os.path.join(dest_dir, TEMPLATE_WORD_FILENAME)
+
+    if src_path.lower().endswith(".doc") and not src_path.lower().endswith(".docx"):
+        converted = convert_doc_to_docx(src_path, dest_dir=dest_dir)
+        if converted and os.path.exists(converted):
+            shutil.copy2(converted, dest_path)
+            return True, dest_path, ("Votre fichier Word ancien format (.doc) a été converti et importé "
+                                     "avec succès au format moderne (.docx) !")
+        else:
+            return False, "", ("Votre fichier est au format ancien Word 97-2003 (.doc) et la conversion "
+                               "automatique a échoué (Microsoft Word / LibreOffice non détectés).\n\n"
+                               "Veuillez ouvrir votre fichier une fois dans Microsoft Word, faire "
+                               "« Fichier > Enregistrer sous » en choisissant « Document Word (*.docx) », "
+                               "puis recharger ce fichier .docx.")
+    else:
+        shutil.copy2(src_path, dest_path)
+        return True, dest_path, ("Le modèle Word a été importé avec succès :\n" + dest_path)
+
+
 def _get_replacement_dict(data):
     """Construit un dictionnaire associant chaque balise {{...}} à sa valeur."""
     import fiche_sinistre_template as tpl
