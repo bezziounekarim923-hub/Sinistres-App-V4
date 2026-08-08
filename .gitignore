@@ -1,0 +1,21 @@
+﻿__pycache__/
+*.pyc
+
+.venv/
+
+# Bases de données et sauvegardes
+*.db
+backups/
+
+# Fichiers de licence
+license.json
+license_master.json
+
+# Fichiers temporaires
+tmp_*.py
+last_import_path.txt
+
+# Fichiers de build
+build/
+dist/
+*.spec
