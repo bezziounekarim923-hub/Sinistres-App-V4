@@ -1,0 +1,27 @@
+{
+  "page_size": "A4",
+  "pages": 2,
+  "template_pdf": "FICHE_DE_SINISTRE_MODELE.pdf",
+  "fields": {
+    "numero_fiche":        { "page": 1, "x": 255, "y": 651, "font_size": 14, "max_width": 270 },
+    "date_sinistre":       { "page": 1, "x": 175, "y": 603, "font_size": 11, "max_width": 350 },
+    "lieu_accident":       { "page": 1, "x": 175, "y": 562, "font_size": 11, "max_width": 350 },
+    "matricule_vehicule":  { "page": 1, "x": 175, "y": 520, "font_size": 11, "max_width": 350 },
+    "chauffeur":           { "page": 1, "x": 245, "y": 479, "font_size": 11, "max_width": 280 },
+    "pv_autorites":        { "page": 1, "x": 250, "y": 438, "font_size": 11, "max_width": 250 },
+    "autorite":            { "page": 1, "x": 215, "y": 397, "font_size": 11, "max_width": 285 },
+    "adresse_autorite":    { "page": 1, "x": 220, "y": 356, "font_size": 11, "max_width": 280 },
+    "tiers":               { "page": 1, "x": 175, "y": 315, "font_size": 11, "max_width": 350 },
+    "documents_recuperes": { "page": 1, "x": 380, "y": 274, "font_size": 11, "max_width": 180 },
+    "degats":              { "page": 1, "x": 175, "y": 232, "font_size": 11, "max_width": 350 },
+    "circonstances":       { "page": 1, "x": 235, "y": 132, "font_size": 11, "max_width": 290 }
+  },
+  "multiline_fields": ["degats", "circonstances"],
+  "notes": [
+    "Le PDF modele provient directement du document Word fourni (FICHE DE SINISTRE PDF.doc).",
+    "Les coordonnees sont en points PDF, origine en bas a gauche.",
+    "Pour ajuster un emplacement, modifiez x/y ici puis re-testez une impression.",
+    "La page 2 est conservee pour reproduire exactement le document source.",
+    "Pour activer ce mode, placez FICHE_DE_SINISTRE_MODELE.pdf a cote de l'application."
+  ]
+}

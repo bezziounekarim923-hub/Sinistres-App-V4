@@ -1,9 +1,28 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Lance tous les tests unitaires du projet (découverte automatique).
+
+Multi-plateforme : utilise l'interpréteur Python courant (``sys.executable``) au
+lieu d'un chemin Windows codé en dur, et exécute TOUS les modules du dossier
+``tests/`` (et non un seul).
+
+Utilisation :  python run_tests.py
+"""
+import os
 import subprocess
 import sys
-import os
 
-cmd = [r"C:\Users\User\AppData\Local\Programs\Python\Python311\python.exe", '-m', 'unittest', 'tests.test_sync_preserves_structure']
-result = subprocess.run(cmd, cwd=os.path.abspath('.'), capture_output=True, text=True)
-print(result.stdout)
-print(result.stderr)
-print('exit_code', result.returncode)
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def main():
+    cmd = [
+        sys.executable, "-m", "unittest",
+        "discover", "-s", "tests", "-p", "test_*.py", "-v",
+    ]
+    result = subprocess.run(cmd, cwd=HERE)
+    return result.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

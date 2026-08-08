@@ -20,6 +20,16 @@ if __name__ == "__main__":
         print("PyInstaller n'est pas installé. Installation en cours...")
         run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
+    # Données à embarquer : spec de coordonnées de la fiche, et modèle PDF
+    # officiel s'il est présent (pour le mode superposition). En --onefile, les
+    # --add-data sont extraits dans le dossier temporaire __file__ au lancement.
+    sep = ";" if os.name == "nt" else ":"
+    add_data = ["--add-data", os.path.join(ROOT, "fiche_template_fields.json") + sep + "."]
+    model_pdf = os.path.join(ROOT, "FICHE_DE_SINISTRE_MODELE.pdf")
+    if os.path.exists(model_pdf):
+        add_data += ["--add-data", model_pdf + sep + "."]
+        print("Modèle de fiche embarqué : FICHE_DE_SINISTRE_MODELE.pdf")
+
     run([
         sys.executable,
         "-m",
@@ -31,6 +41,7 @@ if __name__ == "__main__":
         "sinistres_app",
         "--distpath",
         OUTPUT_DIR,
+        *add_data,
         "main.py",
     ])
 

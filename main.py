@@ -7,6 +7,14 @@ Lancer avec : python main.py
 """
 import os
 import sys
+import logging
+
+# Configuration du logging avant tout le reste (stdlib-only, sans tkinter) afin
+# que les avertissements auparavant avalés silencieusement (S4) soient capturés
+# dans un fichier tournant dès le démarrage.
+import app_logging
+app_logging.setup_logging()
+
 import json
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -22,6 +30,14 @@ import database as db
 import importer
 import analytics as an
 import licensing
+import fiche_sinistre as fiche
+from date_utils import (
+    DATE_INPUT_FORMATS,
+    parse_date_input,
+    format_date_for_display,
+    format_date_for_storage,
+    calculate_reglement_delay,
+)
 
 APP_TITLE = "Suivi des Sinistres — Tableau de bord"
 COLOR_BG = "#f4f6f9"
@@ -44,6 +60,9 @@ FIELDS_FORM = [
     ("type_accident", "Type d'accident"),
     ("degats_cause", "Dégâts causés"),
     ("avec_sans_tiers", "Avec ou sans tiers"),
+    ("autorite_pv", "Autorité du PV"),
+    ("adresse_autorite", "Adresse de l'autorité"),
+    ("documents_recuperes", "Copies des documents récupérées"),
     ("fautif", "Fautif ou pas fautif"),
     ("visa_reparation", "Visa de réparation"),
     ("expertise", "Expertise"),
@@ -55,6 +74,7 @@ FIELDS_FORM = [
     ("date_confirmation_pv", "Date de confirmation des PV (JJ-MM-AAAA)"),
     ("numero_dossier", "N° Dossier"),
     ("montant_pv_expert", "Montant à rembourser selon PV expert"),
+    ("montant_achats", "Montant à rembourser selon les achats"),
     ("montant_reglement_avant_rp", "Montant règlement avant R/P"),
     ("ecart", "Écart"),
     ("banque", "Banque"),
@@ -108,6 +128,7 @@ FIELD_CHOICES = {
     "pv_recu": ["OUI", "NON"],
     "confirmation_pv": ["OUI", "NON"],
     "avec_sans_tiers": ["AVEC TIERS", "SANS TIERS"],
+    "documents_recuperes": ["OUI", "NON"],
 }
 
 # Droits d'accès par rôle (§21)
@@ -129,48 +150,6 @@ DATE_FIELDS = (
     "date_sinistre", "date_declaration", "date_expertise", "date_reception_pv",
     "date_confirmation_pv", "date_reglement"
 )
-DATE_INPUT_FORMATS = ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y")
-
-
-def parse_date_input(value):
-    if value is None:
-        return None
-    if isinstance(value, datetime.datetime):
-        return value.date()
-    if isinstance(value, datetime.date):
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        for fmt in DATE_INPUT_FORMATS:
-            try:
-                return datetime.datetime.strptime(text, fmt).date()
-            except ValueError:
-                continue
-        try:
-            return datetime.date.fromisoformat(text)
-        except ValueError:
-            return None
-    return None
-
-
-def format_date_for_display(value):
-    if value in (None, ""):
-        return ""
-    parsed = parse_date_input(value)
-    if parsed is None:
-        return str(value).strip()
-    return parsed.strftime("%d-%m-%Y")
-
-
-def format_date_for_storage(value):
-    if value in (None, ""):
-        return None
-    parsed = parse_date_input(value)
-    if parsed is None:
-        return value.strip() if isinstance(value, str) else value
-    return parsed.isoformat()
 
 
 class App(tk.Tk):
@@ -909,6 +888,8 @@ class App(tk.Tk):
         self.btn_add.pack(side="right", padx=4)
         self.btn_edit = ttk.Button(bar, text="✏ Modifier", command=self._edit_record)
         self.btn_edit.pack(side="right", padx=4)
+        self.btn_fiche = ttk.Button(bar, text="📄 Générer la fiche", command=self._generate_fiche)
+        self.btn_fiche.pack(side="right", padx=4)
         self.btn_delete_selected = ttk.Button(bar, text="🗑 Supprimer la sélection", command=self._delete_selected)
         self.btn_delete_selected.pack(side="right", padx=4)
         ttk.Button(bar, text="⬇ Exporter (Excel)", command=self._export_view).pack(side="right", padx=4)
@@ -1092,6 +1073,29 @@ class App(tk.Tk):
         if numero:
             return f"N°{numero}"
         return f"#{record.get('id')}"
+
+    def _generate_fiche(self):
+        """Génère la fiche de sinistre officielle pour le sinistre sélectionné.
+        Ouvre un écran de prévisualisation MODIFIABLE : l'utilisateur vérifie/
+        corrige les informations, puis enregistre un PDF ou imprime. Les
+        modifications faites dans la fiche ne touchent PAS le sinistre en base
+        (sauf action explicite « Enregistrer dans le sinistre »)."""
+        sel = self.tree_sinistres.selection()
+        if not sel:
+            messagebox.showinfo("Sélection", "Veuillez sélectionner un sinistre pour générer sa fiche.")
+            return
+        if len(sel) > 1:
+            messagebox.showinfo("Sélection", "La fiche de sinistre se génère pour un seul dossier à la fois.\n\nSélectionnez une seule ligne.")
+            return
+        rid = int(self.tree_sinistres.item(sel[0])["values"][0])
+        with db.db_connection() as conn:
+            row = conn.execute("SELECT * FROM sinistres WHERE id=?", (rid,)).fetchone()
+        if not row:
+            messagebox.showwarning("Sinistre introuvable", "Le sinistre sélectionné est introuvable en base.")
+            return
+        record = dict(row)
+        FicheSinistreDialog(self, record=record, current_user=self.current_user,
+                            can_edit=self.has_permission("edit"))
 
     def _delete_selected(self):
         if not self.has_permission("delete"):
@@ -1995,7 +1999,8 @@ class RecordForm(tk.Toplevel):
             if key in DATE_FIELDS:
                 data[key] = format_date_for_storage(val)
             elif key in ("annee", "delai_reg", "delai_pv_jours", "montant_pv_expert",
-                         "montant_reglement_avant_rp", "jours_immobilisation",
+                         "montant_achats", "montant_reglement_avant_rp",
+                         "jours_immobilisation",
                          "heures_maindoeuvre", "montant_peinture", "montant_fournitures",
                          "vetuste", "franchise", "ecart"):
                 data[key] = float(val) if val else None
@@ -2079,6 +2084,213 @@ class RecordForm(tk.Toplevel):
         if new_values and hasattr(self.app, "_show_notification"):
             self.app._show_notification(f"✓ Enregistré ({len(new_values)} nouvelle(s) valeur(s) ajoutée(s) à l'auto-complétion).")
         self.destroy()
+
+
+class FicheSinistreDialog(tk.Toplevel):
+    """Écran de prévisualisation MODIFIABLE de la fiche de sinistre officielle.
+
+    Les champs sont pré-remplis à partir des données du sinistre sélectionné en
+    base (via ``fiche_sinistre.record_to_fiche_data``). L'utilisateur peut les
+    corriger SANS modifier le sinistre original : ces corrections ne concernent
+    que la fiche en cours de génération. Trois actions finales :
+      - « 💾 Enregistrer PDF » : génère un PDF A4 (l'utilisateur choisit l'emplacement) ;
+      - « 🖨 Imprimer » : génère le PDF puis ouvre la boîte d'impression Windows ;
+      - « Enregistrer dans le sinistre » (si droits d'édition) : reporte les
+        modifications dans le sinistre en base.
+    """
+
+    def __init__(self, parent, record=None, current_user=None, can_edit=False):
+        super().__init__(parent)
+        self.app = parent
+        self.record = record or {}
+        self.current_user = current_user
+        self.can_edit = can_edit
+        self.entries = {}
+        fiche_num = fiche.fiche_number(self.record)
+        self.title(f"Fiche de sinistre {fiche_num}")
+        self.geometry("760x720")
+        self.minsize(680, 600)
+
+        data = fiche.record_to_fiche_data(self.record)
+
+        # ---- En-tête façon fiche officielle ----
+        header = tk.Frame(self, bg=COLOR_PRIMARY)
+        header.pack(fill="x")
+        tk.Label(header, text="FICHE DE SINISTRE", bg=COLOR_PRIMARY, fg="white",
+                 font=("Segoe UI", 16, "bold")).pack(pady=(10, 2))
+        sub = f"N° code CAM : {data.get('code_cam') or '—'}    —    fiche de sinistre {fiche_num}"
+        tk.Label(header, text=sub, bg=COLOR_PRIMARY, fg="#dbe4f0",
+                 font=("Segoe UI", 10)).pack(pady=(0, 8))
+
+        # ---- En-tête organisme (éditable multi-lignes, persisté) ----
+        org_frame = tk.Frame(self, bg=COLOR_BG)
+        org_frame.pack(fill="x", padx=16, pady=(8, 2))
+        tk.Label(org_frame, text="En-tête organisme de la fiche (une ligne par ligne) :",
+                 bg=COLOR_BG, fg=COLOR_PRIMARY,
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        self.txt_letterhead = tk.Text(org_frame, height=6, width=60, wrap="word",
+                                      font=("Segoe UI", 9))
+        self.txt_letterhead.pack(fill="x", padx=(0, 0), pady=(2, 6))
+        letterhead = data.get("letterhead") or fiche.get_letterhead()
+        self.txt_letterhead.insert("1.0", "\n".join(letterhead))
+
+        # ---- Corps : champs éditables ----
+        body = tk.Frame(self, bg=COLOR_CARD)
+        body.pack(fill="both", expand=True, padx=16, pady=12)
+
+        for fiche_key, label, _db_key in fiche.FICHE_FIELD_MAPPING:
+            value = data.get(fiche_key, "")
+            is_multiline = fiche_key in fiche.MULTILINE_FIELDS
+            row = tk.Frame(body, bg=COLOR_CARD)
+            row.pack(fill="x", padx=6, pady=5)
+            if is_multiline:
+                # Champ multiligne (dégâts, circonstances) : libellé au-dessus,
+                # zone de texte sur 3 lignes en dessous.
+                tk.Label(row, text=label + " :", width=60, anchor="w",
+                         bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                         font=("Segoe UI", 9, "bold")).pack(side="top", anchor="w")
+                entry = tk.Text(row, height=3, width=60, wrap="word",
+                                font=("Segoe UI", 10))
+                entry.pack(side="top", fill="x", expand=True, pady=(2, 0))
+                if value:
+                    entry.insert("1.0", value)
+            elif fiche_key in fiche.CHOICE_FIELDS:
+                tk.Label(row, text=label + " :", width=34, anchor="w",
+                         bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                         font=("Segoe UI", 9, "bold")).pack(side="left")
+                choices = list(fiche.CHOICE_FIELDS[fiche_key])
+                entry = ttk.Combobox(row, values=choices, state="normal", width=40)
+                if value:
+                    entry.set(value)
+                entry.pack(side="left", fill="x", expand=True)
+            else:
+                tk.Label(row, text=label + " :", width=34, anchor="w",
+                         bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                         font=("Segoe UI", 9, "bold")).pack(side="left")
+                entry = ttk.Entry(row, width=42)
+                entry.pack(side="left", fill="x", expand=True)
+                if value:
+                    entry.insert(0, value)
+            self.entries[fiche_key] = entry
+
+        # ---- Barre d'actions ----
+        actions = tk.Frame(self, bg=COLOR_BG)
+        actions.pack(fill="x", padx=16, pady=(0, 14))
+        ttk.Button(actions, text="💾 Enregistrer PDF", command=self._save_pdf).pack(side="left", padx=4)
+        ttk.Button(actions, text="🖨 Imprimer", command=self._print).pack(side="left", padx=4)
+        if self.can_edit:
+            ttk.Button(actions, text="📥 Enregistrer dans le sinistre",
+                       command=self._save_back_to_record).pack(side="left", padx=4)
+        ttk.Button(actions, text="Fermer", command=self.destroy).pack(side="right", padx=4)
+
+    def _collect_data(self):
+        """Récupère les valeurs (éditées) des champs sous forme de dict de fiche.
+        Persiste l'en-tête organisme (modifiable) pour les prochaines fiches."""
+        data = {}
+        for fiche_key, _label, _db_key in fiche.FICHE_FIELD_MAPPING:
+            widget = self.entries.get(fiche_key)
+            if widget is None:
+                data[fiche_key] = ""
+                continue
+            # Les champs multilignes sont des tk.Text (get("1.0", "end")),
+            # les autres des ttk.Entry/Combobox (get()).
+            if isinstance(widget, tk.Text):
+                data[fiche_key] = widget.get("1.0", "end").strip("\n").strip()
+            else:
+                data[fiche_key] = widget.get().strip()
+        # En-tête organisme (multi-lignes) : persistance si modifié.
+        letterhead = fiche.get_letterhead()
+        if hasattr(self, "txt_letterhead"):
+            raw = self.txt_letterhead.get("1.0", "end").strip()
+            new_lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+            if new_lines and new_lines != letterhead:
+                letterhead = fiche.set_letterhead(new_lines)  # persistance
+            elif not new_lines:
+                letterhead = fiche.get_letterhead()
+        data["letterhead"] = letterhead
+        data["code_cam"] = (self.record.get("code_cam") or "").strip()
+        data["fiche_number"] = fiche.fiche_number(self.record)
+        return data
+
+    def _build_pdf(self, target_dir):
+        """Génère le PDF dans ``target_dir`` et retourne son chemin absolu."""
+        os.makedirs(target_dir, exist_ok=True)
+        data = self._collect_data()
+        filename = fiche.fiche_filename(self.record)
+        out_path = os.path.join(target_dir, filename)
+        fiche.build_fiche_pdf(data, out_path)
+        return out_path
+
+    def _save_pdf(self):
+        """Demande où enregistrer le PDF puis le génère. Emplacement par défaut :
+        un sous-dossier « Fiches » à côté de l'application (jamais Program Files)."""
+        default_dir = os.path.join(db.get_app_dir(), "Fiches")
+        os.makedirs(default_dir, exist_ok=True)
+        initial = os.path.join(default_dir, fiche.fiche_filename(self.record))
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Enregistrer la fiche de sinistre",
+            defaultextension=".pdf", initialdir=default_dir, initialfile=os.path.basename(initial),
+            filetypes=[("Fichier PDF", "*.pdf")])
+        if not path:
+            return
+        try:
+            fiche.build_fiche_pdf(self._collect_data(), path)
+        except Exception:
+            logging.getLogger(__name__).exception("Échec de génération du PDF de fiche")
+            messagebox.showerror("Erreur", "La génération du PDF a échoué.\n"
+                                 "Consultez le fichier sinistres_app.log pour le détail.", parent=self)
+            return
+        db.log_action(self.current_user, "GENERATION_FICHE",
+                      dossier_label=self.app._record_label(self.record),
+                      sinistre_id=self.record.get("id"),
+                      nouvelle_valeur={"pdf": path})
+        messagebox.showinfo("Fiche enregistrée",
+                            f"La fiche a été enregistrée :\n{path}", parent=self)
+
+    def _print(self):
+        """Génère le PDF dans un dossier temporaire (Fiches) puis lance l'impression."""
+        try:
+            out_path = self._build_pdf(os.path.join(db.get_app_dir(), "Fiches"))
+        except Exception:
+            logging.getLogger(__name__).exception("Échec de génération du PDF de fiche (impression)")
+            messagebox.showerror("Erreur", "La génération du PDF a échoué.", parent=self)
+            return
+        if not fiche.print_pdf(out_path):
+            messagebox.showwarning("Impression",
+                                   "L'impression automatique n'a pas pu être lancée.\n"
+                                   "Le PDF a tout de même été enregistré :\n"
+                                   f"{out_path}\n\n"
+                                   "Vous pouvez l'ouvrir et l'imprimer manuellement.",
+                                   parent=self)
+
+    def _save_back_to_record(self):
+        """Reporte les modifications de la fiche dans le sinistre en base.
+        Action explicite et distincte de la simple génération de la fiche."""
+        if not self.can_edit:
+            messagebox.showwarning("Accès refusé",
+                                   "Votre rôle ne permet pas de modifier un sinistre.", parent=self)
+            return
+        data = self._collect_data()
+        update = {}
+        for fiche_key, _label, db_key in fiche.FICHE_FIELD_MAPPING:
+            update[db_key] = data.get(fiche_key) or None
+        # Re-formate la date en stockage ISO (AAAA-MM-JJ) si elle a été modifiée.
+        if update.get("date_sinistre"):
+            iso = date_utils.format_date_for_storage(update["date_sinistre"])
+            update["date_sinistre"] = iso
+        rid = self.record.get("id")
+        old = next((r for r in db.fetch_all({"include_deleted": True}) if r["id"] == rid), None)
+        db.update_sinistre(rid, update)
+        db.log_action(self.current_user, "MAJ_DEPUIS_FICHE",
+                      dossier_label=self.app._record_label(self.record),
+                      sinistre_id=rid, ancienne_valeur=old, nouvelle_valeur=update)
+        if hasattr(self.app, "refresh_all"):
+            self.app.refresh_all()
+        if hasattr(self.app, "_write_through_sync"):
+            self.app._write_through_sync()
+        messagebox.showinfo("Sinistre mis à jour",
+                            "Les modifications ont été enregistrées dans le sinistre.",
+                            parent=self)
 
 
 class FirstAdminSetupDialog(tk.Toplevel):

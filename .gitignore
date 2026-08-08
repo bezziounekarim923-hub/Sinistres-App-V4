@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 
 .venv/
@@ -14,6 +14,16 @@ license_master.json
 # Fichiers temporaires
 tmp_*.py
 last_import_path.txt
+
+# Logs applicatifs (tournants)
+sinistres_app.log
+sinistres_app.log.*
+
+# Fiches de sinistre générées (PDF)
+Fiches/
+
+# Config de la fiche (nom de l'organisme, etc.)
+fiche_config.json
 
 # Fichiers de build
 build/
