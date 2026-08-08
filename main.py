@@ -1184,9 +1184,10 @@ class App(tk.Tk):
             messagebox.showinfo(
                 "Modèle Word chargé avec succès",
                 f"La fiche Word originale a été chargée :\n{dest_path}\n\n"
+                "🎯 SYSTÈME INTELLIGENT ACTIF :\n"
                 "Pour l'utiliser, cliquez sur « 📄 Générer la fiche » puis sur "
-                "« 📝 Enregistrer Word (.docx) ». Vos balises {{numero_fiche}}, "
-                "{{date_sinistre}}, {{chauffeur}}... seront automatiquement remplacées !"
+                "« 📝 Enregistrer Word (.docx) ». L'application scannera automatiquement "
+                "votre document et insérera les renseignements du sinistre en face de chaque libellé !"
             )
         except Exception as e:
             messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle Word :\n{e}")
@@ -2661,10 +2662,12 @@ class FicheSinistreDialog(tk.Toplevel):
             dest_path = os.path.join(dest_dir, "FICHE_DE_SINISTRE_MODELE.docx")
             shutil.copy2(path, dest_path)
             messagebox.showinfo(
-                "Modèle Word chargé",
+                "Modèle Word chargé avec succès",
                 f"Le modèle Word a été enregistré comme référence :\n{dest_path}\n\n"
-                "En cliquant sur « 📝 Enregistrer Word (.docx) », l'application remplacera "
-                "instantanément vos balises {{...}} par les informations du sinistre !",
+                "🎯 SYSTÈME INTELLIGENT ACTIF :\n"
+                "En cliquant sur « 📝 Enregistrer Word (.docx) », l'application scannera "
+                "automatiquement votre document (même SANS balises) et insérera les "
+                "renseignements du sinistre en face de chaque libellé !",
                 parent=self
             )
         except Exception as e:

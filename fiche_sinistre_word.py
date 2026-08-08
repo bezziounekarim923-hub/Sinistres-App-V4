@@ -121,6 +121,129 @@ def _replace_tags_in_table(table, mapping):
                 _replace_tags_in_table(sub_table, mapping)
 
 
+import unicodedata
+import re
+
+KEYWORD_PATTERNS = [
+    ("date_sinistre", ["date de sinistre", "date du sinistre", "date accident", "date d accident", "date sinistre", "survenu le"]),
+    ("lieu_accident", ["lieu d accident", "lieu de l accident", "lieu accident", "lieu du sinistre", "lieu sinistre", "endroit"]),
+    ("immatriculation", ["matricule", "immatriculation", "vehicule", "n d immatriculation", "numero d immatriculation"]),
+    ("chauffeur", ["chauffeur", "conducteur", "nom du chauffeur", "nom et prenom du chauffeur", "conduit par"]),
+    ("pv_recu", ["y a t il un pv", "pv des autorites", "p v des autorites", "pv autorite", "proces verbal", "pv recu", "p v recu"]),
+    ("adresse_autorite", ["adresse de l autorite", "adresse autorite", "brigade commissariat", "adresse de la brigade", "lieu de l autorite"]),
+    ("autorite_pv", ["quelle autorite", "gendarmerie police", "autorite du pv", "autorite pv", "police ou gendarmerie", "etabli par", "autorite"]),
+    ("avec_sans_tiers", ["avec ou sans tiers", "avec sans tiers", "tiers implique", "tiers", "impliquant un tiers"]),
+    ("documents_recuperes", ["copies des documents", "documents recuperes", "copies recuperees", "pieces recuperees", "si oui les copies", "documents"]),
+    ("degats_cause", ["degats causes", "degats materiels", "nature des degats", "degats au vehicule", "degats", "dommages"]),
+    ("circonstance_accident", ["circonstances de l accident", "circonstance de l accident", "circonstances d accident", "circonstance", "description de l accident", "deroulement", "circonstances"]),
+]
+
+
+def _normalize_text(s):
+    if not s:
+        return ""
+    s = str(s).lower()
+    s = ''.join(c for c in unicodedata.normalize('NFD', s)
+                if unicodedata.category(c) != 'Mn')
+    s = re.sub(r'[^a-z0-9\s]', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
+def _match_field_key(norm_text):
+    """Retourne la clé de champ correspondant au texte normalisé du libellé."""
+    if not norm_text or len(norm_text) < 3:
+        return None
+    for field_key, keywords in KEYWORD_PATTERNS:
+        for kw in keywords:
+            if kw in norm_text:
+                return field_key
+    return None
+
+
+def _fill_paragraph_if_match(p, filled_fields, get_val_fn):
+    """Analyse un paragraphe et le remplit si c'est un libellé suivi de pointillés/deux-points."""
+    text = p.text.strip()
+    if not text or len(text) < 4:
+        return
+    norm = _normalize_text(text)
+    field_key = _match_field_key(norm)
+    if field_key and field_key not in filled_fields:
+        val = get_val_fn(field_key)
+        if not val:
+            return
+        if ":" in p.text:
+            label_part = p.text.split(":", 1)[0].strip()
+            p.text = f"{label_part} : {val}"
+            filled_fields.add(field_key)
+        elif ".." in p.text or "__" in p.text:
+            label_part = re.split(r"(\.\.+|__+)", p.text)[0].strip()
+            p.text = f"{label_part} : {val}"
+            filled_fields.add(field_key)
+
+
+def auto_scan_and_fill_word_doc(doc, data):
+    """Système intelligent de scan et remplissage automatique d'un document Word
+    (.docx) de fiche de sinistre NE CONTENANT PAS de balises {{...}}.
+
+    1. Parcourt tous les tableaux (doc.tables) :
+       - Identifie intelligemment quelle ligne correspond à quel renseignement
+         en analysant le texte de la colonne de gauche (ex: 'Date de sinistre :',
+         'Chauffeur', 'Immatriculation', 'PV', 'Dégâts', etc.).
+       - Insère automatiquement la valeur du sinistre dans la colonne de droite (ou
+         à la suite du libellé dans la cellule).
+    2. Parcourt tous les paragraphes du document (doc.paragraphs) :
+       - Détecte le titre de la fiche ('FICHE DE SINISTRE') et ajoute le n° de fiche.
+       - Détecte les libellés sous forme 'Libellé : .......' et insère la valeur après
+         le deux-points ':'.
+    """
+    filled_fields = set()
+    mapping = _get_replacement_dict(data)
+
+    def get_val_for_key(field_key):
+        if field_key == "numero_fiche":
+            return mapping.get("{{numero_fiche}}", "")
+        tag = f"{{{{{field_key}}}}}"
+        return mapping.get(tag, "")
+
+    # 1. Scan des Tableaux (le cas le plus courant pour un formulaire officiel)
+    for table in doc.tables:
+        for row in table.rows:
+            if len(row.cells) >= 2:
+                left_cell = row.cells[0]
+                right_cell = row.cells[-1]  # dernière cellule de la ligne
+                norm_left = _normalize_text(left_cell.text)
+                field_key = _match_field_key(norm_left)
+                if field_key and field_key not in filled_fields:
+                    val = get_val_for_key(field_key)
+                    if val:
+                        right_cell.text = val
+                        if len(right_cell.paragraphs) > 0 and len(right_cell.paragraphs[0].runs) > 0:
+                            right_cell.paragraphs[0].runs[0].font.name = "Arial"
+                        filled_fields.add(field_key)
+            elif len(row.cells) == 1:
+                _fill_paragraph_if_match(row.cells[0].paragraphs[0], filled_fields, get_val_for_key)
+
+    # 2. Scan des Paragraphes du corps du document
+    for p in doc.paragraphs:
+        _fill_paragraph_if_match(p, filled_fields, get_val_for_key)
+
+    # 3. Traitement spécial du titre (Numéro de fiche) si non rempli
+    num_plain = mapping.get("{{numero_fiche}}", "")
+    if num_plain:
+        for p in doc.paragraphs[:6]:
+            norm_p = _normalize_text(p.text)
+            if "fiche de sinistre" in norm_p and num_plain not in p.text:
+                if ":" in p.text:
+                    p.text = p.text.split(":", 1)[0] + " : " + num_plain
+                elif "n°" in p.text.lower() or "n " in norm_p:
+                    new_t = re.sub(r"(?i)(n°|n)\s*([0-9/.\-_]*)", f"n° {num_plain}", p.text)
+                    p.text = new_t
+                else:
+                    p.text = p.text.strip() + f" n° {num_plain}"
+                break
+
+
 def build_fiche_word(data, output_path):
     """Génère la fiche de sinistre au format Word (.docx) à partir d'un dict de données.
 
@@ -155,6 +278,9 @@ def build_fiche_word(data, output_path):
             _replace_tags_in_paragraph(p, mapping)
         for table in section.footer.tables:
             _replace_tags_in_table(table, mapping)
+
+    # 4. Scan intelligent et remplissage automatique si le modèle ne contient aucune balise {{...}}
+    auto_scan_and_fill_word_doc(doc, data)
 
     doc.save(output_path)
     return output_path

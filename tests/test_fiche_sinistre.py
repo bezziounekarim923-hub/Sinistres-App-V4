@@ -340,6 +340,30 @@ class TemplateOverlayTests(unittest.TestCase):
             self.assertIn("009/2026", full_text)
             self.assertNotIn("{{date_sinistre}}", full_text)
 
+    def test_auto_scan_and_fill_word_doc_without_tags(self):
+        import fiche_sinistre_word as f_word
+        import docx
+        doc = docx.Document()
+        doc.add_paragraph("FICHE DE SINISTRE")
+        table = doc.add_table(rows=2, cols=2)
+        table.rows[0].cells[0].text = "Date de sinistre :"
+        table.rows[0].cells[1].text = ".........."
+        table.rows[1].cells[0].text = "Nom du chauffeur :"
+        table.rows[1].cells[1].text = ".........."
+        tpl_path = os.path.join(self.tmp, "FICHE_DE_SINISTRE_MODELE.docx")
+        doc.save(tpl_path)
+
+        with patch.object(db, "get_app_dir", lambda: self.tmp):
+            data = {"date_sinistre": "08/08/2026", "chauffeur": "Karim TEST", "fiche_number": "123/2026"}
+            out = os.path.join(self.tmp, "filled_smart.docx")
+            f_word.build_fiche_word(data, out)
+            res_doc = docx.Document(out)
+            txt = " ".join([p.text for p in res_doc.paragraphs] +
+                           [c.text for r in res_doc.tables[0].rows for c in r.cells])
+            self.assertIn("08/08/2026", txt)
+            self.assertIn("Karim TEST", txt)
+            self.assertIn("123/2026", txt)
+
 
 if __name__ == "__main__":
     unittest.main()
