@@ -189,8 +189,33 @@ importées automatiquement.
 
 ### Dépendance supplémentaire
 
-La génération PDF utilise **reportlab**. Si vous aviez déjà installé
-l'application, **relancez `1_installer.bat` une fois** pour ajouter reportlab.
+La génération PDF utilise **reportlab** et **pypdf**. Si vous aviez déjà installé
+l'application, **relancez `1_installer.bat` une fois** pour les ajouter.
+
+### Deux modes de génération (fiche à l'identique du modèle officiel)
+
+L'application génère la fiche de deux façons, automatiquement :
+
+1. **Mode superposition (recommandé, fidèle au modèle)** : si le fichier
+   `FICHE_DE_SINISTRE_MODELE.pdf` (votre document Word officiel converti en PDF)
+   est placé **à côté de l'application**, l'application l'utilise comme arrière-plan
+   et superpose uniquement les valeurs variables aux emplacements prévus. Cela
+   conserve **exactement** le logo, la typographie, les marges et la mise en page
+   de votre document original.
+
+2. **Mode dessiné (secours)** : si le modèle est absent, l'application redessine
+   une fiche A4 propre (en-tête organisme, champs, signatures). Tout fonctionne,
+   mais le rendu n'est pas celui du document Word.
+
+**Pour activer le mode superposition** :
+1. Convertissez `FICHE DE SINISTRE PDF.doc` en PDF (Word → *Enregistrer sous* → PDF)
+   et nommez-le **`FICHE_DE_SINISTRE_MODELE.pdf`**.
+2. Placez-le à côté de l'application (ou dans `%APPDATA%\SinistresApp\` en .exe).
+3. C'est tout — la prochaine fiche générée utilisera le modèle.
+
+**Ajuster les emplacements** : les coordonnées des champs sont dans
+`fiche_template_fields.json` (à côté de l'application). Vous pouvez y corriger
+les `x`/`y` d'un champ après un test d'impression, sans toucher au code.
 
 ---
 

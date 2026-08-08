@@ -8,9 +8,10 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import database as db
 import fiche_sinistre as fiche
+import fiche_sinistre_template as fiche_tpl
 
 try:
-    import pypdf  # dépendance de test uniquement (extraction de texte PDF)
+    import pypdf  # runtime (mode superposition) + extraction de texte pour les tests
     _HAS_PYPDF = True
 except Exception:
     _HAS_PYPDF = False
@@ -223,6 +224,95 @@ class OriginalRecordConservationTests(_IsolatedDb):
         after = db.fetch_all({"include_deleted": True})[0]
         self.assertEqual(after["lieu_accident"], "Alger")
         self.assertNotEqual(data["lieu_accident"], after["lieu_accident"])
+
+
+# -------------------------------------------------------- mode superposition (modèle)
+@unittest.skipUnless(_HAS_PYPDF, "pypdf non installé (dépendance runtime)")
+class TemplateOverlayTests(unittest.TestCase):
+    """Mode superposition : quand FICHE_DE_SINISTRE_MODELE.pdf est présent, les
+    valeurs sont superposées sur le modèle (logo/typo conservés), sinon bascule
+    sur le mode dessiné. On crée un faux modèle PDF pour les tests."""
+
+    def _make_fake_model(self, dirpath, pages=2):
+        """Crée un faux modèle A4 avec un libellé fixe reconnu ('MODELE_SENTINEL')."""
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        path = os.path.join(dirpath, fiche_tpl.TEMPLATE_FILENAME)
+        c = canvas.Canvas(path, pagesize=A4)
+        c.drawString(100, 700, "MODELE_SENTINEL")
+        c.drawString(100, 651, "N° code CAM :      fiche de sinistre n°")
+        c.showPage()
+        for _ in range(pages - 1):
+            c.showPage()
+        c.save()
+        return path
+
+    def _record(self):
+        return {"id": 1, "annee": 2026, "numero": "N9", "code_cam": "CAM-12",
+                "chauffeur": "Mohamed X", "date_sinistre": "2026-08-05",
+                "lieu_accident": "Alger", "immatriculation": "123456-16",
+                "pv_recu": "OUI", "autorite_pv": "Gendarmerie nationale",
+                "adresse_autorite": "Caserne Y", "avec_sans_tiers": "AVEC TIERS",
+                "documents_recuperes": "OUI", "degats_cause": "Pare-chocs",
+                "circonstance_accident": "Collision arriere"}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="fiche_tpl_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_adapter_maps_internal_keys_to_template_keys(self):
+        data = fiche.record_to_fiche_data(self._record())
+        tpl = fiche_tpl.fiche_data_to_template_fields(data)
+        # Mapping réel (database -> modèle).
+        self.assertEqual(tpl["matricule_vehicule"], "123456-16")  # <- immatriculation
+        self.assertEqual(tpl["degats"], "Pare-chocs")             # <- degats_cause
+        self.assertEqual(tpl["circonstances"], "Collision arriere")  # <- circonstance_accident
+        self.assertEqual(tpl["autorite"], "Gendarmerie nationale")   # <- autorite_pv
+        self.assertEqual(tpl["tiers"], "AVEC TIERS")              # <- avec_sans_tiers
+        self.assertEqual(tpl["pv_autorites"], "OUI")              # <- pv_recu
+        # numero_fiche au format « NNN/AAAA ».
+        self.assertIn("009/2026", tpl["numero_fiche"])
+
+    def test_adapter_never_invents_missing_data(self):
+        rec = self._record()
+        rec["autorite_pv"] = None
+        rec["adresse_autorite"] = None
+        tpl = fiche_tpl.fiche_data_to_template_fields(fiche.record_to_fiche_data(rec))
+        self.assertEqual(tpl["autorite"], "")
+        self.assertEqual(tpl["adresse_autorite"], "")
+
+    def test_template_mode_used_when_model_present(self):
+        with patch.object(db, "get_app_dir", lambda: self.tmp):
+            self._make_fake_model(self.tmp)
+            self.assertTrue(fiche_tpl.template_is_available())
+            data = fiche.record_to_fiche_data(self._record())
+            out = os.path.join(self.tmp, "tpl.pdf")
+            fiche.build_fiche_pdf(data, out)
+        reader = pypdf.PdfReader(out)
+        # Le modèle comporte 2 pages : la pagination est conservée.
+        self.assertEqual(len(reader.pages), 2)
+        txt = reader.pages[0].extract_text()
+        # Le contenu statique du modèle est conservé (mode superposition).
+        self.assertIn("MODELE_SENTINEL", txt)
+        # Les valeurs variables sont superposées.
+        self.assertIn("Mohamed X", txt)
+        self.assertIn("Gendarmerie nationale", txt)
+        self.assertIn("009/2026", txt)
+
+    def test_drawn_fallback_when_model_absent(self):
+        with patch.object(db, "get_app_dir", lambda: self.tmp):
+            self.assertFalse(fiche_tpl.template_is_available())
+            data = fiche.record_to_fiche_data(self._record())
+            out = os.path.join(self.tmp, "fallback.pdf")
+            fiche.build_fiche_pdf(data, out)
+        reader = pypdf.PdfReader(out)
+        txt = reader.pages[0].extract_text()
+        # Mode dessiné : titre + en-tête organisme, pas la sentinelle du modèle.
+        self.assertIn("FICHE DE SINISTRE", txt)
+        self.assertNotIn("MODELE_SENTINEL", txt)
+        self.assertIn("Mohamed X", txt)
 
 
 if __name__ == "__main__":

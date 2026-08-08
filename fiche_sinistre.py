@@ -208,13 +208,35 @@ def _is_blank(value):
 
 
 def build_fiche_pdf(data, output_path):
-    """Génère le PDF A4 de la fiche de sinistre à partir d'un dict de champs
-    (tel que produit par ``record_to_fiche_data`` ou modifié par l'utilisateur).
+    """Génère le PDF A4 de la fiche de sinistre à partir d'un dict de champs.
 
-    ``data`` doit contenir au minimum les clés de ``FICHE_FIELD_MAPPING`` plus
-    ``code_cam`` et ``fiche_number``. Les valeurs vides donnent une ligne vide
-    (à remplir manuellement). Retourne le chemin du fichier généré.
+    Mode superposition (préféré) : si le modèle officiel ``FICHE_DE_SINISTRE_MODELE.pdf``
+    est présent à côté de l'application, les valeurs sont superposées sur le
+    document original — ce qui conserve le logo, la typographie et la mise en page
+    exacte du modèle Word. Les données absentes restent vides (rien n'est inventé).
+
+    Mode dessiné (secours) : si le modèle est absent, une fiche A4 est redessinée
+    à partir de zéro (en-tête organisme, champs soulignés, zones de signature).
+
+    ``data`` est un dict tel que produit par ``record_to_fiche_data`` ou modifié
+    par l'utilisateur. Retourne le chemin du fichier généré.
     """
+    # Tentative du mode superposition (modèle officiel).
+    try:
+        import fiche_sinistre_template as templ
+        if templ.template_is_available():
+            return templ.build_fiche_pdf_from_template(data, output_path)
+    except FileNotFoundError:
+        pass  # modèle absent -> on bascule sur le mode dessiné
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Mode superposition indisponible, bascule sur le mode dessiné.", exc_info=True)
+    return _build_fiche_pdf_drawn(data, output_path)
+
+
+def _build_fiche_pdf_drawn(data, output_path):
+    """Génère une fiche A4 redessinée à partir de zéro (mode secours, sans modèle).
+    Utilisé quand ``FICHE_DE_SINISTRE_MODELE.pdf`` n'est pas présent."""
     c = rl_canvas.Canvas(output_path, pagesize=A4)
     width, height = A4
     margin_x = 18 * mm
