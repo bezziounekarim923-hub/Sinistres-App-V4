@@ -29,6 +29,10 @@ if __name__ == "__main__":
     if os.path.exists(model_pdf):
         add_data += ["--add-data", model_pdf + sep + "."]
         print("Modèle de fiche embarqué : FICHE_DE_SINISTRE_MODELE.pdf")
+    model_docx = os.path.join(ROOT, "FICHE_DE_SINISTRE_MODELE.docx")
+    if os.path.exists(model_docx):
+        add_data += ["--add-data", model_docx + sep + "."]
+        print("Modèle de fiche Word embarqué : FICHE_DE_SINISTRE_MODELE.docx")
 
     run([
         sys.executable,

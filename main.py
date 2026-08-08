@@ -892,6 +892,8 @@ class App(tk.Tk):
         self.btn_fiche.pack(side="right", padx=4)
         self.btn_load_template = ttk.Button(bar, text="📎 Charger modèle PDF", command=self._load_fiche_template)
         self.btn_load_template.pack(side="right", padx=4)
+        self.btn_word_template = ttk.Button(bar, text="📎 Modèle Word (.docx)", command=self._load_word_template)
+        self.btn_word_template.pack(side="right", padx=4)
         self.btn_calibrate = ttk.Button(bar, text="📐 Calibrer modèle", command=self._open_template_calibration)
         self.btn_calibrate.pack(side="right", padx=4)
         self.btn_delete_selected = ttk.Button(bar, text="🗑 Supprimer la sélection", command=self._delete_selected)
@@ -1103,6 +1105,7 @@ class App(tk.Tk):
         menu.add_command(label="✏ Modifier ce sinistre", command=self._edit_record, state=state_edit)
         menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
         menu.add_command(label="📎 Charger modèle PDF original", command=self._load_fiche_template)
+        menu.add_command(label="📎 Charger modèle Word (.docx)", command=self._load_word_template)
         menu.add_command(label="📐 Calibrer positions du modèle PDF", command=self._open_template_calibration)
         menu.add_separator()
         menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
@@ -1163,6 +1166,30 @@ class App(tk.Tk):
     def _open_template_calibration(self):
         """Ouvre la fenêtre interactive de calibrage des positions du modèle de fiche PDF."""
         TemplateCalibrationDialog(self)
+
+    def _load_word_template(self):
+        """Permet de charger le modèle Word (.docx) avec vos balises {{...}}."""
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Sélectionner le modèle Word officiel de la Fiche (.docx)",
+            filetypes=[("Documents Word", "*.docx"), ("Tous les fichiers", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            import shutil
+            dest_dir = db.get_app_dir()
+            dest_path = os.path.join(dest_dir, "FICHE_DE_SINISTRE_MODELE.docx")
+            shutil.copy2(path, dest_path)
+            messagebox.showinfo(
+                "Modèle Word chargé avec succès",
+                f"La fiche Word originale a été chargée :\n{dest_path}\n\n"
+                "Pour l'utiliser, cliquez sur « 📄 Générer la fiche » puis sur "
+                "« 📝 Enregistrer Word (.docx) ». Vos balises {{numero_fiche}}, "
+                "{{date_sinistre}}, {{chauffeur}}... seront automatiquement remplacées !"
+            )
+        except Exception as e:
+            messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle Word :\n{e}")
 
     def _delete_selected(self):
         if not self.has_permission("delete"):
@@ -2463,7 +2490,10 @@ class FicheSinistreDialog(tk.Toplevel):
         actions = tk.Frame(self, bg=COLOR_BG)
         actions.pack(fill="x", padx=16, pady=(0, 14))
         ttk.Button(actions, text="💾 Enregistrer PDF", command=self._save_pdf).pack(side="left", padx=4)
+        ttk.Button(actions, text="📝 Enregistrer Word (.docx)", command=self._save_word).pack(side="left", padx=4)
         ttk.Button(actions, text="🖨 Imprimer", command=self._print).pack(side="left", padx=4)
+        ttk.Button(actions, text="📎 Modèle Word (.docx)", command=self._load_word_template).pack(side="left", padx=4)
+        ttk.Button(actions, text="📥 Créer modèle Word (.docx)", command=self._create_word_template).pack(side="left", padx=4)
         ttk.Button(actions, text="📎 Charger modèle original (PDF)", command=self._load_original_template).pack(side="left", padx=4)
         ttk.Button(actions, text="📐 Calibrer modèle", command=self._open_template_calibration).pack(side="left", padx=4)
         if self.can_edit:
@@ -2535,6 +2565,39 @@ class FicheSinistreDialog(tk.Toplevel):
         messagebox.showinfo("Fiche enregistrée",
                             f"La fiche a été enregistrée :\n{path}", parent=self)
 
+    def _save_word(self):
+        """Demande où enregistrer la fiche au format Word (.docx) puis la génère."""
+        import fiche_sinistre_word as f_word
+        default_dir = os.path.join(db.get_app_dir(), "Fiches")
+        os.makedirs(default_dir, exist_ok=True)
+        filename = fiche.fiche_filename(self.record).replace(".pdf", ".docx")
+        initial = os.path.join(default_dir, filename)
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Enregistrer la fiche de sinistre (Word .docx)",
+            defaultextension=".docx", initialdir=default_dir, initialfile=os.path.basename(initial),
+            filetypes=[("Document Word", "*.docx")])
+        if not path:
+            return
+        try:
+            f_word.build_fiche_word(self._collect_data(), path)
+        except Exception as e:
+            logging.getLogger(__name__).exception("Échec de génération Word de fiche")
+            messagebox.showerror("Erreur", f"La génération Word a échoué :\n{e}", parent=self)
+            return
+        db.log_action(self.current_user, "GENERATION_FICHE_WORD",
+                      dossier_label=self.app._record_label(self.record),
+                      sinistre_id=self.record.get("id"),
+                      nouvelle_valeur={"word": path})
+        if messagebox.askyesno("Fiche Word enregistrée",
+                               f"La fiche Word a été enregistrée avec succès :\n{path}\n\n"
+                               "Voulez-vous ouvrir ce document Word maintenant ?",
+                               parent=self):
+            if os.name == "nt":
+                os.startfile(path)
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", path], check=False)
+
     def _print(self):
         """Génère le PDF dans un dossier temporaire (Fiches) puis lance l'impression."""
         try:
@@ -2581,6 +2644,59 @@ class FicheSinistreDialog(tk.Toplevel):
     def _open_template_calibration(self):
         """Ouvre la fenêtre interactive de calibrage du modèle."""
         TemplateCalibrationDialog(self)
+
+    def _load_word_template(self):
+        """Permet de charger ou créer le modèle de fiche Word (.docx) avec balises {{...}}."""
+        import fiche_sinistre_word as f_word
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Sélectionner le modèle Word (.docx) avec vos balises {{...}}",
+            filetypes=[("Documents Word", "*.docx"), ("Tous les fichiers", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            import shutil
+            dest_dir = db.get_app_dir()
+            dest_path = os.path.join(dest_dir, "FICHE_DE_SINISTRE_MODELE.docx")
+            shutil.copy2(path, dest_path)
+            messagebox.showinfo(
+                "Modèle Word chargé",
+                f"Le modèle Word a été enregistré comme référence :\n{dest_path}\n\n"
+                "En cliquant sur « 📝 Enregistrer Word (.docx) », l'application remplacera "
+                "instantanément vos balises {{...}} par les informations du sinistre !",
+                parent=self
+            )
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de charger le modèle Word :\n{e}", parent=self)
+
+    def _create_word_template(self):
+        """Génère un modèle Word (.docx) avec toutes les balises {{...}} prêt à être
+        personnalisé dans Microsoft Word par l'utilisateur."""
+        import fiche_sinistre_word as f_word
+        default_dir = os.path.join(db.get_app_dir(), "Fiches")
+        os.makedirs(default_dir, exist_ok=True)
+        initial = os.path.join(default_dir, "FICHE_DE_SINISTRE_MODELE.docx")
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Enregistrer le modèle Word prêt à personnaliser (.docx)",
+            defaultextension=".docx", initialdir=default_dir, initialfile=os.path.basename(initial),
+            filetypes=[("Document Word", "*.docx")])
+        if not path:
+            return
+        try:
+            f_word.create_default_word_template(path)
+            if messagebox.askyesno("Modèle Word créé",
+                                   f"Le modèle Word avec balises {{...}} a été créé :\n{path}\n\n"
+                                   "Voulez-vous ouvrir ce document dans Word pour le personnaliser "
+                                   "(ajouter logo, modifier polices, etc.) ?",
+                                   parent=self):
+                if os.name == "nt":
+                    os.startfile(path)
+                else:
+                    import subprocess
+                    subprocess.run(["xdg-open", path], check=False)
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de créer le modèle Word :\n{e}", parent=self)
 
     def _save_back_to_record(self):
         """Reporte les modifications de la fiche dans le sinistre en base.

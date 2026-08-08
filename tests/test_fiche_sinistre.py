@@ -325,6 +325,21 @@ class TemplateOverlayTests(unittest.TestCase):
             reset_spec = fiche_tpl.get_current_field_spec()
             self.assertNotIn("test_field", reset_spec.get("fields", {}))
 
+    def test_build_fiche_word_creates_and_fills_template(self):
+        import fiche_sinistre_word as f_word
+        import docx
+        with patch.object(db, "get_app_dir", lambda: self.tmp):
+            data = fiche.record_to_fiche_data(self._record())
+            out = os.path.join(self.tmp, "fiche_test.docx")
+            f_word.build_fiche_word(data, out)
+            self.assertTrue(os.path.exists(out))
+            doc = docx.Document(out)
+            full_text = " ".join([p.text for p in doc.paragraphs] +
+                                 [cell.text for row in doc.tables[0].rows for cell in row.cells])
+            self.assertIn("Mohamed X", full_text)
+            self.assertIn("009/2026", full_text)
+            self.assertNotIn("{{date_sinistre}}", full_text)
+
 
 if __name__ == "__main__":
     unittest.main()

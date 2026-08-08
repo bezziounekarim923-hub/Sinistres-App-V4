@@ -189,33 +189,25 @@ importées automatiquement.
 
 ### Dépendance supplémentaire
 
-La génération PDF utilise **reportlab** et **pypdf**. Si vous aviez déjà installé
+La génération PDF utilise **reportlab**, **pypdf** et **python-docx**. Si vous aviez déjà installé
 l'application, **relancez `1_installer.bat` une fois** pour les ajouter.
 
-### Deux modes de génération (fiche à l'identique du modèle officiel)
+### Deux formats de modèle : Word (.docx, recommandé et ultra-simple) et PDF
 
-L'application génère la fiche de deux façons, automatiquement :
+L'application permet de générer la fiche de sinistre de plusieurs façons :
 
-1. **Mode superposition (recommandé, fidèle au modèle)** : si le fichier
-   `FICHE_DE_SINISTRE_MODELE.pdf` (votre document Word officiel converti en PDF)
-   est placé **à côté de l'application**, l'application l'utilise comme arrière-plan
-   et superpose uniquement les valeurs variables aux emplacements prévus. Cela
-   conserve **exactement** le logo, la typographie, les marges et la mise en page
-   de votre document original.
+1. **Mode Word (.docx) avec balises (Recommandé - Zéro calibrage !)** :
+   - C'est la méthode la plus simple. Word gère automatiquement les tableaux, retours à la ligne et marges.
+   - Vous pouvez insérer des balises comme `{{numero_fiche}}`, `{{date_sinistre}}`, `{{chauffeur}}`, `{{degats_cause}}`, `{{circonstance_accident}}` partout dans votre document Word (`.docx`).
+   - Cliquez sur **« 📝 Enregistrer Word (.docx) »** : l'application remplace instantanément vos balises par les vraies valeurs du sinistre.
+   - **Vous n'avez pas de modèle ?** Cliquez sur **« 📥 Créer modèle Word (.docx) »** dans la fenêtre de fiche : l'application vous génère un document officiel prêt à être personnalisé dans Microsoft Word (ajout de logo, polices, etc.).
 
-2. **Mode dessiné (secours)** : si le modèle est absent, l'application redessine
-   une fiche A4 propre (en-tête organisme, champs, signatures). Tout fonctionne,
-   mais le rendu n'est pas celui du document Word.
+2. **Mode superposition PDF (fidèle au modèle PDF original)** :
+   - Si vous préférez utiliser votre fichier PDF d'origine, vous pouvez l'importer via **« 📎 Charger modèle PDF »**.
+   - **Outil de Calibrage interactif** : Si votre conversion Word → PDF a décalé les écritures, cliquez sur **« 📐 Calibrer modèle »** dans l'application pour ajuster globalement (gauche/droite, haut/bas) ou par champ, tester immédiatement avec un PDF d'essai et enregistrer.
 
-**Pour activer le mode superposition** :
-1. Convertissez `FICHE DE SINISTRE PDF.doc` en PDF (Word → *Enregistrer sous* → PDF)
-   et nommez-le **`FICHE_DE_SINISTRE_MODELE.pdf`**.
-2. Placez-le à côté de l'application (ou dans `%APPDATA%\SinistresApp\` en .exe).
-3. C'est tout — la prochaine fiche générée utilisera le modèle.
-
-**Ajuster les emplacements** : les coordonnées des champs sont dans
-`fiche_template_fields.json` (à côté de l'application). Vous pouvez y corriger
-les `x`/`y` d'un champ après un test d'impression, sans toucher au code.
+3. **Mode dessiné (secours)** :
+   - Si aucun modèle n'est importé, l'application redessine une fiche A4 propre (en-tête organisme, champs, signatures).
 
 ---
 
