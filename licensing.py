@@ -119,8 +119,47 @@ def check_master_password(password):
 
 
 # --------------------------------------------------------------- jetons de licence
+def _signing_key():
+    """Clé de signature dérivée du hash du mot de passe maître (stocké dans
+    license_master.json), combinée au secret embarqué (pepper). Un attaquant
+    qui extrait uniquement le .exe ne possède pas le hash maître (propre à la
+    machine) et ne peut donc pas forger un jeton valide — il lui faut aussi le
+    mot de passe maître. Retourne None si aucun mot de passe maître n'est défini."""
+    path = get_master_path()
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        stored = data.get("hash")
+        if not stored or not isinstance(stored, str):
+            return None
+        return (APP_SECRET + "$" + stored).encode("utf-8")
+    except Exception:
+        logger.warning("Échec de lecture du master pour la clé de signature: %s", path, exc_info=True)
+        return None
+
+
+def _candidate_signing_keys():
+    """Clés à essayer pour vérifier un jeton, par ordre de préférence :
+    1) clé dérivée du mot de passe maître (nouveaux jetons, S2) ;
+    2) secret embarqué seul (jetons legacy, compatibilité ascendante)."""
+    keys = []
+    master_key = _signing_key()
+    if master_key:
+        keys.append(master_key)
+    keys.append(APP_SECRET.encode("utf-8"))
+    return keys
+
+
 def _sign(payload):
-    return hmac.new(APP_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    """Signe un payload avec la clé courante (dérivée du mot de passe maître
+    si défini, sinon le secret embarqué seul). Utilisé pour la GÉNÉRATION de
+    nouveaux jetons, qui reste protégée par la saisie du mot de passe maître."""
+    key = _signing_key()
+    if key is None:
+        key = APP_SECRET.encode("utf-8")
+    return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def generate_license_token(duration_days=DEFAULT_DURATION_DAYS, label=""):
@@ -140,10 +179,15 @@ def _decode_token(token):
         raw = token.replace("-", "").replace(" ", "").replace("\n", "")
         decoded = base64.urlsafe_b64decode(raw.encode("utf-8")).decode("utf-8")
         expiry, label, signature = decoded.split("|")
-        expected = _sign(f"{expiry}|{label}")
-        if not hmac.compare_digest(signature, expected):
-            return None
-        return {"expiry": expiry, "label": label}
+        payload = f"{expiry}|{label}"
+        # On accepte la signature faite avec la clé maître (nouveaux jetons) OU
+        # avec le secret embarqué seul (jetons legacy générés avant S2), pour ne
+        # pas invalider les licences déjà déployées lors de la mise à niveau.
+        for key in _candidate_signing_keys():
+            expected = hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(signature, expected):
+                return {"expiry": expiry, "label": label}
+        return None
     except Exception:
         # Échec attendu sur jeton malformé (saisie utilisateur) : on reste
         # silencieux à ce niveau (appelé très souvent) mais on ne masque pas

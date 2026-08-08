@@ -510,7 +510,17 @@ def truncate_all():
         conn.commit()
 
 
+# Colonnes autorisées pour get_distinct : liste blanche fermée pour empêcher
+# toute injection SQL (le nom de colonne est interpolé dans la requête).
+_ALLOWED_DISTINCT_COLUMNS = set(COLUMNS)
+
+
 def get_distinct(column: str):
+    """Valeurs distinctes non vides d'une colonne, triées. Le nom de colonne est
+    validé contre une liste blanche (S3) pour empêcher une injection SQL via un
+    nom de colonne arbitraire."""
+    if column not in _ALLOWED_DISTINCT_COLUMNS:
+        raise ValueError(f"Colonne non autorisée pour get_distinct : {column!r}")
     with db_connection() as conn:
         rows = conn.execute(
             f"SELECT DISTINCT {column} FROM sinistres WHERE {column} IS NOT NULL AND {column} != '' ORDER BY {column}"

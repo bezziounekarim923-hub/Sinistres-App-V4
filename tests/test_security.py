@@ -1,10 +1,12 @@
 import os
 import sys
 import json
+import hmac
 import shutil
 import tempfile
 import unittest
 import hashlib
+import datetime
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -115,6 +117,76 @@ class MasterPasswordTests(_IsolatedDir):
         self.assertEqual(data.get("algo"), "pbkdf2_sha256")
         self.assertTrue(data["hash"].startswith("pbkdf2_sha256$"))
         self.assertTrue(licensing.check_master_password("oldmaster"))
+
+
+# --------------------------------------------------------------- S2 : signature de licence
+class LicenseSigningTests(_IsolatedDir):
+    def _set_master(self, password="master-pw"):
+        licensing.set_master_password(password)
+
+    def test_new_token_signed_with_master_key_verifies(self):
+        self._set_master()
+        token = licensing.generate_license_token(duration_days=10, label="poste-A")
+        parsed = licensing._decode_token(token)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["label"], "poste-A")
+        ok, msg = licensing.apply_license_token(token)
+        self.assertTrue(ok, msg)
+        status = licensing.check_license()
+        self.assertTrue(status["valid"])
+
+    def test_token_from_app_secret_alone_still_validates(self):
+        """Compatibilité ascendante : un jeton signé avec le seul APP_SECRET
+        (format d'avant S2) doit encore être accepté."""
+        self._set_master()  # un master est défini => clé maître prioritaire
+        import base64 as _b64
+        expiry = (datetime.date.today() + datetime.timedelta(days=10)).isoformat()
+        payload = f"{expiry}|legacy"
+        legacy_sig = hmac.new(licensing.APP_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        raw = f"{payload}|{legacy_sig}"
+        encoded = _b64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
+        token = "-".join(encoded[i:i + 5] for i in range(0, len(encoded), 5))
+        parsed = licensing._decode_token(token)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["label"], "legacy")
+
+    def test_token_rejected_when_signature_tampered(self):
+        self._set_master()
+        token = licensing.generate_license_token(duration_days=10, label="x")
+        # Corrompt la signature : remplace le dernier groupe.
+        parts = token.split("-")
+        parts[-1] = "AAAAA" if parts[-1] != "AAAAA" else "BBBBB"
+        tampered = "-".join(parts)
+        self.assertIsNone(licensing._decode_token(tampered))
+
+    def test_master_key_differs_from_app_secret_only(self):
+        """La clé de signature doit différer selon le mot de passe maître :
+        un jeton forgé avec APP_SECRET seul ne correspond pas à la clé maître."""
+        self._set_master("secret-A")
+        key_a = licensing._signing_key()
+        self._set_master("secret-B")
+        key_b = licensing._signing_key()
+        self.assertNotEqual(key_a, key_b)
+        self.assertNotEqual(key_a, licensing.APP_SECRET.encode("utf-8"))
+
+
+# --------------------------------------------------------------- S3 : liste blanche get_distinct
+class GetDistinctWhitelistTests(_IsolatedDir):
+    def test_allowed_column_returns_values(self):
+        db.bulk_insert([{"annee": 2024, "chauffeur": "Alice", "date_sinistre": "2024-01-01",
+                         "source_sheet": "2024"},
+                        {"annee": 2024, "chauffeur": "Bob", "date_sinistre": "2024-02-01",
+                         "source_sheet": "2024"}])
+        values = db.get_distinct("chauffeur")
+        self.assertEqual(sorted(values), ["Alice", "Bob"])
+
+    def test_disallowed_column_raises(self):
+        with self.assertRaises(ValueError):
+            db.get_distinct("chauffeur; DROP TABLE sinistres; --")
+
+    def test_nonexistent_column_raises(self):
+        with self.assertRaises(ValueError):
+            db.get_distinct("does_not_exist")
 
 
 if __name__ == "__main__":
