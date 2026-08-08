@@ -890,6 +890,8 @@ class App(tk.Tk):
         self.btn_edit.pack(side="right", padx=4)
         self.btn_fiche = ttk.Button(bar, text="📄 Générer la fiche", command=self._generate_fiche)
         self.btn_fiche.pack(side="right", padx=4)
+        self.btn_load_template = ttk.Button(bar, text="📎 Charger modèle PDF", command=self._load_fiche_template)
+        self.btn_load_template.pack(side="right", padx=4)
         self.btn_delete_selected = ttk.Button(bar, text="🗑 Supprimer la sélection", command=self._delete_selected)
         self.btn_delete_selected.pack(side="right", padx=4)
         ttk.Button(bar, text="⬇ Exporter (Excel)", command=self._export_view).pack(side="right", padx=4)
@@ -1098,6 +1100,7 @@ class App(tk.Tk):
         menu.add_command(label="➕ Ajouter un sinistre", command=self._add_record, state=state_create)
         menu.add_command(label="✏ Modifier ce sinistre", command=self._edit_record, state=state_edit)
         menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
+        menu.add_command(label="📎 Charger modèle PDF original", command=self._load_fiche_template)
         menu.add_separator()
         menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
 
@@ -1128,6 +1131,31 @@ class App(tk.Tk):
         record = dict(row)
         FicheSinistreDialog(self, record=record, current_user=self.current_user,
                             can_edit=self.has_permission("edit"))
+
+    def _load_fiche_template(self):
+        """Permet de charger le fichier PDF de la fiche de sinistre originale (modèle
+        officiel de l'entreprise). Ce PDF est copié dans le dossier des données et sera
+        automatiquement utilisé en superposition lors de la génération des fiches."""
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Sélectionner le modèle PDF officiel de la Fiche de Sinistre",
+            filetypes=[("Fichiers PDF", "*.pdf"), ("Tous les fichiers", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            import shutil
+            dest_dir = db.get_app_dir()
+            dest_path = os.path.join(dest_dir, "FICHE_DE_SINISTRE_MODELE.pdf")
+            shutil.copy2(path, dest_path)
+            messagebox.showinfo(
+                "Modèle chargé avec succès",
+                f"La fiche de sinistre originale a été chargée :\n{dest_path}\n\n"
+                "Les fiches générées utiliseront désormais ce modèle exact en arrière-plan "
+                "(les informations du sinistre seront superposées sur votre document officiel)."
+            )
+        except Exception as e:
+            messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle :\n{e}")
 
     def _delete_selected(self):
         if not self.has_permission("delete"):
@@ -2210,6 +2238,7 @@ class FicheSinistreDialog(tk.Toplevel):
         actions.pack(fill="x", padx=16, pady=(0, 14))
         ttk.Button(actions, text="💾 Enregistrer PDF", command=self._save_pdf).pack(side="left", padx=4)
         ttk.Button(actions, text="🖨 Imprimer", command=self._print).pack(side="left", padx=4)
+        ttk.Button(actions, text="📎 Charger modèle original (PDF)", command=self._load_original_template).pack(side="left", padx=4)
         if self.can_edit:
             ttk.Button(actions, text="📥 Enregistrer dans le sinistre",
                        command=self._save_back_to_record).pack(side="left", padx=4)
@@ -2294,6 +2323,33 @@ class FicheSinistreDialog(tk.Toplevel):
                                    f"{out_path}\n\n"
                                    "Vous pouvez l'ouvrir et l'imprimer manuellement.",
                                    parent=self)
+
+    def _load_original_template(self):
+        """Permet de charger le fichier PDF du modèle officiel de la fiche de sinistre.
+        Ce fichier est enregistré comme FICHE_DE_SINISTRE_MODELE.pdf dans le dossier de
+        l'application et sera immédiatement utilisé en superposition lors de la génération
+        ('Enregistrer PDF' / 'Imprimer')."""
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Sélectionner la fiche de sinistre originale (modèle officiel .pdf)",
+            filetypes=[("Fichiers PDF", "*.pdf"), ("Tous les fichiers", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            import shutil
+            dest_dir = db.get_app_dir()
+            dest_path = os.path.join(dest_dir, "FICHE_DE_SINISTRE_MODELE.pdf")
+            shutil.copy2(path, dest_path)
+            messagebox.showinfo(
+                "Modèle chargé avec succès",
+                f"La fiche originale a été copiée comme modèle officiel :\n{dest_path}\n\n"
+                "Vos prochaines générations ('Enregistrer PDF' ou 'Imprimer') utiliseront "
+                "automatiquement ce document en superposition.",
+                parent=self
+            )
+        except Exception as e:
+            messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle :\n{e}", parent=self)
 
     def _save_back_to_record(self):
         """Reporte les modifications de la fiche dans le sinistre en base.

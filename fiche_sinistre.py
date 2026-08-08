@@ -356,7 +356,11 @@ def _build_fiche_pdf_drawn(data, output_path):
     # ---- Zones de signature (deux cadres côte à côte) ----
     sig_box_h = 22 * mm
     sig_box_w = (width - 2 * margin_x - 10 * mm) / 2
-    sig_y = max(y - 12 * mm, 22 * mm)
+    # sig_y est le BORD INFÉRIEUR du cadre de signature.
+    # Pour ne pas chevaucher / monter sur le dernier champ au-dessus ("Circonstance d'accident", à y),
+    # le haut du cadre (sig_y + sig_box_h) doit rester en-dessous de (y - 6 * mm).
+    max_sig_y = y - 6 * mm - sig_box_h
+    sig_y = max(15 * mm, min(max_sig_y, 25 * mm))
     left_x = margin_x
     right_x = margin_x + sig_box_w + 10 * mm
 
