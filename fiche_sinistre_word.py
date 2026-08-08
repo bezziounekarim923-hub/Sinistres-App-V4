@@ -137,6 +137,8 @@ def _get_replacement_dict(data):
     mapping = {
         "{{numero_fiche}}": num_plain,
         "{{numero_fiche_complet}}": num_full,
+        "{{code_cam}}": val("code_cam"),
+        "{{cam}}": val("code_cam"),
         "{{date_sinistre}}": val("date_sinistre"),
         "{{lieu_accident}}": val("lieu_accident"),
         "{{immatriculation}}": val("immatriculation"),
@@ -196,6 +198,7 @@ import unicodedata
 import re
 
 KEYWORD_PATTERNS = [
+    ("code_cam", ["code cam", "n code cam", "numero code cam", "code c a m", "cam"]),
     ("date_sinistre", ["date de sinistre", "date du sinistre", "date accident", "date d accident", "date sinistre", "survenu le"]),
     ("lieu_accident", ["lieu d accident", "lieu de l accident", "lieu accident", "lieu du sinistre", "lieu sinistre", "endroit"]),
     ("immatriculation", ["matricule", "immatriculation", "vehicule", "n d immatriculation", "numero d immatriculation"]),
@@ -232,15 +235,23 @@ def _match_field_key(norm_text):
     return None
 
 
-def _safe_replace_or_set_text(p, new_text):
-    """Remplace le texte d'un paragraphe docx.Paragraph en conservant 100%
-    du formatage existant (police, taille, gras, italique, couleur, alignement)."""
+def _safe_replace_or_set_text(p, new_text, strip_bold_underline=True):
+    """Remplace le texte d'un paragraphe docx.Paragraph en conservant 100% de la
+    taille et police d'origine, mais sans mettre en gras ni souligner
+    (le texte inséré reste dans l'écriture normale du fichier d'origine)."""
     if len(p.runs) > 0:
-        p.runs[0].text = str(new_text)
-        for r in p.runs[1:]:
-            r.text = ""
+        r = p.runs[0]
+        r.text = str(new_text)
+        if strip_bold_underline:
+            r.bold = False
+            r.underline = False
+        for extra in p.runs[1:]:
+            extra.text = ""
     else:
-        p.add_run(str(new_text))
+        r = p.add_run(str(new_text))
+        if strip_bold_underline:
+            r.bold = False
+            r.underline = False
 
 
 def _fill_paragraph_if_match(p, filled_fields, get_val_fn):
