@@ -6,19 +6,97 @@ import sqlite3
 import os
 import re
 import shutil
+import sys
 import datetime
 
 DB_NAME = "sinistres.db"
 
+# Nom du dossier de données utilisateur utilisé en secours (quand le dossier de
+# l'exécutable n'est pas inscriptible, ex. .exe installé dans « Program Files »).
+APP_DATA_DIRNAME = "SinistresApp"
+
+# Nombre maximum de sauvegardes SQLite conservées par rotation (voir backup_db).
+MAX_BACKUPS = 50
+
+
+def _is_writable(path):
+    """Renvoie True si on peut créer un fichier dans ``path`` (le dossier est
+    créé s'il n'existe pas). Test réel d'écriture, non heuristique."""
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError:
+        return False
+    test = os.path.join(path, f".write_test_{os.getpid()}")
+    try:
+        with open(test, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(test)
+        return True
+    except OSError:
+        return False
+
+
+def _user_data_dir():
+    """Dossier de données persistant et inscriptible propre à l'utilisateur.
+    Windows : ``%APPDATA%\\SinistresApp`` ; autres : ``$XDG_DATA_HOME`` ou
+    ``~/.local/share/SinistresApp``."""
+    if sys.platform.startswith("win"):
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, APP_DATA_DIRNAME)
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, APP_DATA_DIRNAME)
+
+
+def _migrate_app_files(src_dir, dst_dir):
+    """Copie une seule fois les fichiers persistants (base, licence, mot de passe
+    maître, couleurs) depuis l'ancien dossier vers le nouveau, sans écraser un
+    fichier déjà présent dans la destination. Échecs silencieux (best-effort)."""
+    try:
+        os.makedirs(dst_dir, exist_ok=True)
+    except OSError:
+        return
+    for fname in (DB_NAME, "license.json", "license_master.json", "status_colors.json"):
+        src = os.path.join(src_dir, fname)
+        dst = os.path.join(dst_dir, fname)
+        if os.path.exists(src) and not os.path.exists(dst):
+            try:
+                shutil.copy2(src, dst)
+            except OSError:
+                pass
+
+
+def _resolve_app_dir(legacy_dir, is_frozen):
+    """Choisit le dossier d'application inscriptible.
+
+    - En mode script (dev/tests, ``is_frozen`` faux) : on reste à côté du script
+      (comportement historique), qu'il soit inscriptible ou non — les tests et le
+      développement reposent sur ce repère stable.
+    - En mode .exe compilé : si le dossier de l'exécutable est inscriptible, on
+      l'utilise (rétro-compatibilité : données déjà présentes à côté du .exe).
+      Sinon (ex. « Program Files »), on bascule sur le dossier de données
+      utilisateur et on y migre les fichiers existants une seule fois.
+    """
+    if not is_frozen:
+        return legacy_dir
+    if _is_writable(legacy_dir):
+        return legacy_dir
+    new_dir = _user_data_dir()
+    _migrate_app_files(legacy_dir, new_dir)
+    return new_dir
+
 
 def get_app_dir():
     """Retourne le dossier persistant de l'application : à côté du .exe si l'app est
-    compilée (PyInstaller), sinon à côté du script. Ne JAMAIS utiliser __file__ seul
-    pour localiser un fichier persistant : en .exe --onefile, __file__ pointe vers un
+    compilée (PyInstaller) et inscriptible, sinon à côté du script — ou, en .exe
+    compilé installé dans un dossier non inscriptible (Program Files), un dossier
+    de données utilisateur inscriptible. Ne JAMAIS utiliser __file__ seul pour
+    localiser un fichier persistant : en .exe --onefile, __file__ pointe vers un
     dossier temporaire différent à chaque lancement (et supprimé à la fermeture)."""
-    if getattr(__import__("sys"), "frozen", False):
-        return os.path.dirname(__import__("sys").executable)
-    return os.path.dirname(os.path.abspath(__file__))
+    if getattr(sys, "frozen", False):
+        legacy = os.path.dirname(sys.executable)
+    else:
+        legacy = os.path.dirname(os.path.abspath(__file__))
+    return _resolve_app_dir(legacy, getattr(sys, "frozen", False))
 
 
 def get_db_path():
@@ -52,6 +130,7 @@ CREATE TABLE IF NOT EXISTS sinistres (
     date_confirmation_pv TEXT,
     numero_dossier TEXT,
     montant_pv_expert REAL,
+    montant_achats REAL,
     montant_reglement_avant_rp REAL,
     ecart REAL,
     banque TEXT,
@@ -88,7 +167,7 @@ COLUMNS = [
     "type_accident", "degats_cause", "avec_sans_tiers", "fautif",
     "visa_reparation", "expertise", "date_expertise", "pv_recu",
     "date_reception_pv", "delai_pv_jours", "confirmation_pv",
-    "date_confirmation_pv", "numero_dossier", "montant_pv_expert",
+    "date_confirmation_pv", "numero_dossier", "montant_pv_expert", "montant_achats",
     "montant_reglement_avant_rp", "ecart", "banque", "numero_cheque",
     "date_reglement", "jours_immobilisation", "heures_maindoeuvre",
     "montant_peinture", "montant_fournitures", "vetuste", "franchise",
@@ -106,7 +185,9 @@ def get_connection():
 
 
 def backup_db():
-    """Crée une copie de sauvegarde de la base SQLite avant une modification importante."""
+    """Crée une copie de sauvegarde de la base SQLite avant une modification
+    importante, puis applique une rotation pour ne pas saturer le disque :
+    seules les ``MAX_BACKUPS`` sauvegardes les plus récentes sont conservées."""
     db_path = get_db_path()
     if not os.path.exists(db_path):
         return None
@@ -115,7 +196,27 @@ def backup_db():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(backup_dir, f"sinistres_backup_{timestamp}.db")
     shutil.copy2(db_path, backup_path)
+    _prune_backups(backup_dir)
     return backup_path
+
+
+def _prune_backups(backup_dir, keep=MAX_BACKUPS):
+    """Supprime les sauvegardes SQLite les plus anciennes au-delà de ``keep``,
+    pour éviter que le dossier backups/ ne grossisse indéfiniment (une copie
+    complète était créée à chaque ajout/modification/suppression)."""
+    try:
+        files = [f for f in os.listdir(backup_dir)
+                 if f.startswith("sinistres_backup_") and f.endswith(".db")]
+    except OSError:
+        return
+    if len(files) <= keep:
+        return
+    files.sort(key=lambda f: os.path.getmtime(os.path.join(backup_dir, f)))
+    for f in files[:len(files) - keep]:
+        try:
+            os.remove(os.path.join(backup_dir, f))
+        except OSError:
+            pass
 
 
 def ensure_schema():
@@ -134,6 +235,8 @@ def ensure_schema():
     for optional_col in ("compagnie", "agence", "expert", "camion", "assure"):
         if optional_col not in cols:
             conn.execute(f"ALTER TABLE sinistres ADD COLUMN {optional_col} TEXT")
+    if "montant_achats" not in cols:
+        conn.execute("ALTER TABLE sinistres ADD COLUMN montant_achats REAL")
     
     if "created_at" not in cols:
         conn.execute("ALTER TABLE sinistres ADD COLUMN created_at TEXT")
@@ -313,6 +416,10 @@ def _apply_post_filters(rows, filters):
 def update_sinistre(record_id: int, record: dict):
     backup_db()
     conn = get_connection()
+    # Toujours actualiser le timestamp de dernière modification (contrairement à
+    # bulk_insert qui ne le renseigne pas). On force la clé dans le dictionnaire
+    # pour qu'elle soit incluse dans le SET quelle que soit la valeur envoyée.
+    record["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     cols = [c for c in COLUMNS if c in record]
     set_clause = ",".join([f"{c}=?" for c in cols])
     values = [record.get(c) for c in cols]

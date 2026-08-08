@@ -22,6 +22,13 @@ import database as db
 import importer
 import analytics as an
 import licensing
+from date_utils import (
+    DATE_INPUT_FORMATS,
+    parse_date_input,
+    format_date_for_display,
+    format_date_for_storage,
+    calculate_reglement_delay,
+)
 
 APP_TITLE = "Suivi des Sinistres — Tableau de bord"
 COLOR_BG = "#f4f6f9"
@@ -55,6 +62,7 @@ FIELDS_FORM = [
     ("date_confirmation_pv", "Date de confirmation des PV (JJ-MM-AAAA)"),
     ("numero_dossier", "N° Dossier"),
     ("montant_pv_expert", "Montant à rembourser selon PV expert"),
+    ("montant_achats", "Montant à rembourser selon les achats"),
     ("montant_reglement_avant_rp", "Montant règlement avant R/P"),
     ("ecart", "Écart"),
     ("banque", "Banque"),
@@ -129,48 +137,6 @@ DATE_FIELDS = (
     "date_sinistre", "date_declaration", "date_expertise", "date_reception_pv",
     "date_confirmation_pv", "date_reglement"
 )
-DATE_INPUT_FORMATS = ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y")
-
-
-def parse_date_input(value):
-    if value is None:
-        return None
-    if isinstance(value, datetime.datetime):
-        return value.date()
-    if isinstance(value, datetime.date):
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        for fmt in DATE_INPUT_FORMATS:
-            try:
-                return datetime.datetime.strptime(text, fmt).date()
-            except ValueError:
-                continue
-        try:
-            return datetime.date.fromisoformat(text)
-        except ValueError:
-            return None
-    return None
-
-
-def format_date_for_display(value):
-    if value in (None, ""):
-        return ""
-    parsed = parse_date_input(value)
-    if parsed is None:
-        return str(value).strip()
-    return parsed.strftime("%d-%m-%Y")
-
-
-def format_date_for_storage(value):
-    if value in (None, ""):
-        return None
-    parsed = parse_date_input(value)
-    if parsed is None:
-        return value.strip() if isinstance(value, str) else value
-    return parsed.isoformat()
 
 
 class App(tk.Tk):
@@ -1995,7 +1961,8 @@ class RecordForm(tk.Toplevel):
             if key in DATE_FIELDS:
                 data[key] = format_date_for_storage(val)
             elif key in ("annee", "delai_reg", "delai_pv_jours", "montant_pv_expert",
-                         "montant_reglement_avant_rp", "jours_immobilisation",
+                         "montant_achats", "montant_reglement_avant_rp",
+                         "jours_immobilisation",
                          "heures_maindoeuvre", "montant_peinture", "montant_fournitures",
                          "vetuste", "franchise", "ecart"):
                 data[key] = float(val) if val else None
