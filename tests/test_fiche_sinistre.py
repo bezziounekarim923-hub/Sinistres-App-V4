@@ -314,6 +314,17 @@ class TemplateOverlayTests(unittest.TestCase):
         self.assertNotIn("MODELE_SENTINEL", txt)
         self.assertIn("Mohamed X", txt)
 
+    def test_save_and_reset_field_spec(self):
+        with patch.object(db, "get_app_dir", lambda: self.tmp):
+            spec = fiche_tpl.get_current_field_spec()
+            spec["fields"]["test_field"] = {"x": 100, "y": 200, "font_size": 12}
+            fiche_tpl.save_field_spec(spec)
+            loaded = fiche_tpl.get_current_field_spec()
+            self.assertEqual(loaded["fields"]["test_field"]["x"], 100)
+            fiche_tpl.reset_field_spec()
+            reset_spec = fiche_tpl.get_current_field_spec()
+            self.assertNotIn("test_field", reset_spec.get("fields", {}))
+
 
 if __name__ == "__main__":
     unittest.main()

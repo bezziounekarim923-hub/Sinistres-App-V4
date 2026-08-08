@@ -892,6 +892,8 @@ class App(tk.Tk):
         self.btn_fiche.pack(side="right", padx=4)
         self.btn_load_template = ttk.Button(bar, text="📎 Charger modèle PDF", command=self._load_fiche_template)
         self.btn_load_template.pack(side="right", padx=4)
+        self.btn_calibrate = ttk.Button(bar, text="📐 Calibrer modèle", command=self._open_template_calibration)
+        self.btn_calibrate.pack(side="right", padx=4)
         self.btn_delete_selected = ttk.Button(bar, text="🗑 Supprimer la sélection", command=self._delete_selected)
         self.btn_delete_selected.pack(side="right", padx=4)
         ttk.Button(bar, text="⬇ Exporter (Excel)", command=self._export_view).pack(side="right", padx=4)
@@ -1101,6 +1103,7 @@ class App(tk.Tk):
         menu.add_command(label="✏ Modifier ce sinistre", command=self._edit_record, state=state_edit)
         menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
         menu.add_command(label="📎 Charger modèle PDF original", command=self._load_fiche_template)
+        menu.add_command(label="📐 Calibrer positions du modèle PDF", command=self._open_template_calibration)
         menu.add_separator()
         menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
 
@@ -1156,6 +1159,10 @@ class App(tk.Tk):
             )
         except Exception as e:
             messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle :\n{e}")
+
+    def _open_template_calibration(self):
+        """Ouvre la fenêtre interactive de calibrage des positions du modèle de fiche PDF."""
+        TemplateCalibrationDialog(self)
 
     def _delete_selected(self):
         if not self.has_permission("delete"):
@@ -2146,6 +2153,225 @@ class RecordForm(tk.Toplevel):
         self.destroy()
 
 
+class TemplateCalibrationDialog(tk.Toplevel):
+    """Fenêtre interactive permettant de calibrer (ajuster) les coordonnées et
+    tailles de police des champs superposés sur le modèle officiel de fiche PDF.
+
+    Offre :
+    - Des boutons de décalage global (X et Y) pour translater tous les champs d'un
+      bloc si la conversion Word -> PDF de l'utilisateur a décalé toute la page ;
+    - Un tableau d'édition fine pour ajuster (x, y, taille) champ par champ ;
+    - Un bouton « Tester l'impression (PDF d'essai) » générant une fiche test ;
+    - La sauvegarde immédiate dans le fichier fiche_template_fields.json.
+    """
+
+    FIELD_LABELS = {
+        "numero_fiche": "Numéro de fiche",
+        "date_sinistre": "Date de sinistre",
+        "lieu_accident": "Lieu d'accident",
+        "matricule_vehicule": "Matricule (immatriculation)",
+        "chauffeur": "Chauffeur",
+        "pv_autorites": "PV des autorités",
+        "autorite": "Autorité du PV",
+        "adresse_autorite": "Adresse de l'autorité",
+        "tiers": "Avec / Sans tiers",
+        "documents_recuperes": "Documents récupérés",
+        "degats": "Dégâts causés",
+        "circonstances": "Circonstances de l'accident"
+    }
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.app = parent
+        self.title("📐 Calibrage du modèle PDF officiel (Ajustement des positions)")
+        self.geometry("840x680")
+        self.minsize(700, 520)
+
+        import fiche_sinistre_template as templ
+        self.spec = templ.get_current_field_spec()
+        self.fields_data = self.spec.get("fields", {})
+        self.entry_vars = {}
+
+        # ---- En-tête ----
+        header = tk.Frame(self, bg=COLOR_PRIMARY)
+        header.pack(fill="x")
+        tk.Label(header, text="CALIBRAGE DU MODÈLE DE FICHE PDF",
+                 bg=COLOR_PRIMARY, fg="white", font=("Segoe UI", 14, "bold")).pack(pady=(12, 2))
+        tk.Label(header,
+                 text="Ajustez facilement les positions si vos écritures sont décalées par rapport à votre PDF original.",
+                 bg=COLOR_PRIMARY, fg="#dbe4f0", font=("Segoe UI", 9)).pack(pady=(0, 10))
+
+        # ---- Bloc de décalage global (Tous les champs en un clic) ----
+        global_frame = tk.LabelFrame(self, text=" ⚡ Décalage global de TOUS les champs en bloc (toute la fiche) ",
+                                     bg=COLOR_BG, fg=COLOR_PRIMARY, font=("Segoe UI", 10, "bold"))
+        global_frame.pack(fill="x", padx=16, pady=10)
+
+        row_h = tk.Frame(global_frame, bg=COLOR_BG)
+        row_h.pack(fill="x", padx=10, pady=4)
+        tk.Label(row_h, text="Horizontale (X - gauche/droite) :", width=26, anchor="w",
+                 bg=COLOR_BG, fg=COLOR_PRIMARY, font=("Segoe UI", 9, "bold")).pack(side="left")
+        ttk.Button(row_h, text="⬅ -10 pt (gauche)", command=lambda: self._shift_all(dx=-10)).pack(side="left", padx=3)
+        ttk.Button(row_h, text="⬅ -2 pt", command=lambda: self._shift_all(dx=-2)).pack(side="left", padx=3)
+        ttk.Button(row_h, text="➡ +2 pt", command=lambda: self._shift_all(dx=2)).pack(side="left", padx=3)
+        ttk.Button(row_h, text="➡ +10 pt (droite)", command=lambda: self._shift_all(dx=10)).pack(side="left", padx=3)
+
+        row_v = tk.Frame(global_frame, bg=COLOR_BG)
+        row_v.pack(fill="x", padx=10, pady=(2, 8))
+        tk.Label(row_v, text="Verticale (Y - bas/haut) :", width=26, anchor="w",
+                 bg=COLOR_BG, fg=COLOR_PRIMARY, font=("Segoe UI", 9, "bold")).pack(side="left")
+        ttk.Button(row_v, text="⬇ -10 pt (plus bas)", command=lambda: self._shift_all(dy=-10)).pack(side="left", padx=3)
+        ttk.Button(row_v, text="⬇ -2 pt", command=lambda: self._shift_all(dy=-2)).pack(side="left", padx=3)
+        ttk.Button(row_v, text="⬆ +2 pt (plus haut)", command=lambda: self._shift_all(dy=2)).pack(side="left", padx=3)
+        ttk.Button(row_v, text="⬆ +10 pt", command=lambda: self._shift_all(dy=10)).pack(side="left", padx=3)
+
+        # ---- Zone défilante : Liste des champs ----
+        lbl_info = tk.Label(self, text="Ajustement fin (coordonnées en points PDF, origine 0,0 en bas à gauche de la page) :",
+                            bg=COLOR_BG, fg="#444444", font=("Segoe UI", 9, "bold"), anchor="w")
+        lbl_info.pack(fill="x", padx=16, pady=(4, 2))
+
+        container = tk.Frame(self, bg=COLOR_CARD)
+        container.pack(fill="both", expand=True, padx=16, pady=4)
+
+        canvas_win = tk.Canvas(container, bg=COLOR_CARD, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas_win.yview)
+        scroll_frame = tk.Frame(canvas_win, bg=COLOR_CARD)
+        scroll_frame.bind("<Configure>", lambda e: canvas_win.configure(scrollregion=canvas_win.bbox("all")))
+        canvas_win.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas_win.configure(yscrollcommand=scrollbar.set)
+        canvas_win.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # En-tête de la table des champs
+        thead = tk.Frame(scroll_frame, bg="#f0f4f8")
+        thead.pack(fill="x", pady=(2, 6))
+        tk.Label(thead, text="Champ", width=28, anchor="w", bg="#f0f4f8", font=("Segoe UI", 9, "bold")).pack(side="left", padx=6)
+        tk.Label(thead, text="Pos X (pt)", width=12, anchor="center", bg="#f0f4f8", font=("Segoe UI", 9, "bold")).pack(side="left", padx=4)
+        tk.Label(thead, text="Pos Y (pt)", width=12, anchor="center", bg="#f0f4f8", font=("Segoe UI", 9, "bold")).pack(side="left", padx=4)
+        tk.Label(thead, text="Taille (pt)", width=12, anchor="center", bg="#f0f4f8", font=("Segoe UI", 9, "bold")).pack(side="left", padx=4)
+
+        for field_key, label_str in self.FIELD_LABELS.items():
+            fpos = self.fields_data.get(field_key, {"x": 175, "y": 500, "font_size": 11})
+            x_var = tk.IntVar(value=int(fpos.get("x", 175)))
+            y_var = tk.IntVar(value=int(fpos.get("y", 500)))
+            size_var = tk.DoubleVar(value=float(fpos.get("font_size", 11)))
+            self.entry_vars[field_key] = {"x": x_var, "y": y_var, "size": size_var}
+
+            row = tk.Frame(scroll_frame, bg=COLOR_CARD)
+            row.pack(fill="x", pady=3, padx=6)
+            tk.Label(row, text=label_str, width=28, anchor="w",
+                     bg=COLOR_CARD, fg=COLOR_PRIMARY, font=("Segoe UI", 9)).pack(side="left")
+            ttk.Entry(row, textvariable=x_var, width=10).pack(side="left", padx=8)
+            ttk.Entry(row, textvariable=y_var, width=10).pack(side="left", padx=8)
+            ttk.Entry(row, textvariable=size_var, width=10).pack(side="left", padx=8)
+
+        # ---- Barre d'actions bas ----
+        actions = tk.Frame(self, bg=COLOR_BG)
+        actions.pack(fill="x", padx=16, pady=12)
+
+        ttk.Button(actions, text="🔍 Tester avec un PDF d'essai", command=self._test_pdf).pack(side="left", padx=4)
+        ttk.Button(actions, text="💾 Enregistrer le calibrage", command=self._save_calibration).pack(side="left", padx=4)
+        ttk.Button(actions, text="🔄 Réinitialiser (par défaut)", command=self._reset_defaults).pack(side="left", padx=4)
+        ttk.Button(actions, text="Fermer", command=self.destroy).pack(side="right", padx=4)
+
+    def _shift_all(self, dx=0, dy=0):
+        """Translate l'ensemble des coordonnées X ou Y de tous les champs."""
+        for field_key, vars_dict in self.entry_vars.items():
+            if dx:
+                val = vars_dict["x"].get()
+                vars_dict["x"].set(val + dx)
+            if dy:
+                val = vars_dict["y"].get()
+                vars_dict["y"].set(val + dy)
+
+    def _collect_spec(self):
+        """Récupère les variables modifiées et construit le dict spec."""
+        for field_key, vars_dict in self.entry_vars.items():
+            if field_key not in self.fields_data:
+                self.fields_data[field_key] = {}
+            self.fields_data[field_key]["x"] = vars_dict["x"].get()
+            self.fields_data[field_key]["y"] = vars_dict["y"].get()
+            self.fields_data[field_key]["font_size"] = vars_dict["size"].get()
+        self.spec["fields"] = self.fields_data
+        return self.spec
+
+    def _save_calibration(self):
+        import fiche_sinistre_template as templ
+        spec = self._collect_spec()
+        dest = templ.save_field_spec(spec)
+        messagebox.showinfo(
+            "Calibrage enregistré",
+            f"Les nouvelles coordonnées ont été sauvegardées :\n{dest}\n\n"
+            "Toutes les futures générations de fiche en superposition utiliseront ces positions !",
+            parent=self
+        )
+
+    def _reset_defaults(self):
+        if not messagebox.askyesno("Réinitialiser",
+                                   "Voulez-vous réinitialiser toutes les positions "
+                                   "aux valeurs par défaut de l'application ?",
+                                   parent=self):
+            return
+        import fiche_sinistre_template as templ
+        templ.reset_field_spec()
+        self.spec = templ.get_current_field_spec()
+        self.fields_data = self.spec.get("fields", {})
+        for field_key, vars_dict in self.entry_vars.items():
+            fpos = self.fields_data.get(field_key, {"x": 175, "y": 500, "font_size": 11})
+            vars_dict["x"].set(int(fpos.get("x", 175)))
+            vars_dict["y"].set(int(fpos.get("y", 500)))
+            vars_dict["size"].set(float(fpos.get("font_size", 11)))
+        messagebox.showinfo("Réinitialisation", "Coordonnées réinitialisées avec succès.", parent=self)
+
+    def _test_pdf(self):
+        """Génère un PDF de test avec un dossier fictif et ouvre le résultat
+        (ou demande où l'enregistrer) pour vérifier l'alignement de l'impression."""
+        import fiche_sinistre_template as templ
+        if not templ.template_is_available():
+            messagebox.showwarning(
+                "Modèle original absent",
+                "Vous n'avez pas encore chargé de modèle PDF officiel.\n"
+                "Cliquez sur « 📎 Charger modèle PDF » pour en importer un avant de tester "
+                "le calibrage.",
+                parent=self
+            )
+            return
+        # Sauvegarde d'abord le calibrage en cours pour que le test l'utilise
+        self._save_calibration()
+
+        test_data = {
+            "fiche_number": "999/2026",
+            "date_sinistre": "08/08/2026",
+            "lieu_accident": "Alger (Test calibrage)",
+            "immatriculation": "00000-000-16",
+            "chauffeur": "CHAUFFEUR TEST",
+            "pv_recu": "OUI",
+            "autorite_pv": "Gendarmerie Test",
+            "adresse_autorite": "123 Rue de Test, Alger",
+            "avec_sans_tiers": "AVEC TIERS",
+            "documents_recuperes": "OUI (PV+Permis)",
+            "degats_cause": "Test d'alignement du texte sur le modèle (Pare-chocs, capot, optiques).",
+            "circonstance_accident": "Test d'alignement des circonstances d'accident (véhicule à l'arrêt, choc arrière)."
+        }
+
+        default_dir = os.path.join(db.get_app_dir(), "Fiches")
+        os.makedirs(default_dir, exist_ok=True)
+        out_path = os.path.join(default_dir, "Fiche_Test_Calibrage.pdf")
+        try:
+            templ.build_fiche_pdf_from_template(test_data, out_path)
+            if messagebox.askyesno(
+                    "Test généré",
+                    f"Le PDF de test a été généré avec vos réglages actuels :\n{out_path}\n\n"
+                    "Voulez-vous ouvrir ce fichier maintenant pour vérifier visuellement le calibrage ?",
+                    parent=self):
+                if os.name == "nt":
+                    os.startfile(out_path)
+                else:
+                    import subprocess
+                    subprocess.run(["xdg-open", out_path], check=False)
+        except Exception as e:
+            messagebox.showerror("Erreur de génération test", f"Impossible de générer le test :\n{e}", parent=self)
+
+
 class FicheSinistreDialog(tk.Toplevel):
     """Écran de prévisualisation MODIFIABLE de la fiche de sinistre officielle.
 
@@ -2239,6 +2465,7 @@ class FicheSinistreDialog(tk.Toplevel):
         ttk.Button(actions, text="💾 Enregistrer PDF", command=self._save_pdf).pack(side="left", padx=4)
         ttk.Button(actions, text="🖨 Imprimer", command=self._print).pack(side="left", padx=4)
         ttk.Button(actions, text="📎 Charger modèle original (PDF)", command=self._load_original_template).pack(side="left", padx=4)
+        ttk.Button(actions, text="📐 Calibrer modèle", command=self._open_template_calibration).pack(side="left", padx=4)
         if self.can_edit:
             ttk.Button(actions, text="📥 Enregistrer dans le sinistre",
                        command=self._save_back_to_record).pack(side="left", padx=4)
@@ -2350,6 +2577,10 @@ class FicheSinistreDialog(tk.Toplevel):
             )
         except Exception as e:
             messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle :\n{e}", parent=self)
+
+    def _open_template_calibration(self):
+        """Ouvre la fenêtre interactive de calibrage du modèle."""
+        TemplateCalibrationDialog(self)
 
     def _save_back_to_record(self):
         """Reporte les modifications de la fiche dans le sinistre en base.

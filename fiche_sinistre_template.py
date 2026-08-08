@@ -84,6 +84,38 @@ def _load_field_spec():
         return None
 
 
+def get_current_field_spec():
+    """Retourne la spécification actuelle des champs (depuis l'app dir ou default)."""
+    spec = _load_field_spec()
+    if not spec:
+        spec = {
+            "page_size": "A4",
+            "pages": 2,
+            "template_pdf": "FICHE_DE_SINISTRE_MODELE.pdf",
+            "fields": {},
+            "multiline_fields": ["degats", "circonstances"]
+        }
+    return spec
+
+
+def save_field_spec(spec):
+    """Enregistre la spécification modifiée dans le dossier de données de l'application."""
+    dest = os.path.join(db.get_app_dir(), "fiche_template_fields.json")
+    with open(dest, "w", encoding="utf-8") as fh:
+        json.dump(spec, fh, indent=2, ensure_ascii=False)
+    return dest
+
+
+def reset_field_spec():
+    """Réinitialise les positions en supprimant le fichier personnalisé du dossier d'app."""
+    dest = os.path.join(db.get_app_dir(), "fiche_template_fields.json")
+    if os.path.exists(dest):
+        try:
+            os.remove(dest)
+        except Exception:
+            pass
+
+
 # Correspondance : clé interne de la fiche -> clé attendue par le modèle.
 # (clé_interne, clé_modèle, fonction_de_conversion_optionnelle)
 def _fiche_number_plain(record_or_data):
