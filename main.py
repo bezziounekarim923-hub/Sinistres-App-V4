@@ -892,6 +892,10 @@ class App(tk.Tk):
         self.btn_fiche.pack(side="right", padx=4)
         self.btn_word_template = ttk.Button(bar, text="📎 Modèle Word (.doc / .docx)", command=self._load_word_template)
         self.btn_word_template.pack(side="right", padx=4)
+        self.btn_pj = ttk.Button(bar, text="📎 Pièces jointes", command=self._show_pieces_jointes)
+        self.btn_pj.pack(side="right", padx=4)
+        self.btn_batch_word = ttk.Button(bar, text="📦 Export Word (Lot)", command=self._export_word_batch)
+        self.btn_batch_word.pack(side="right", padx=4)
         self.btn_delete_selected = ttk.Button(bar, text="🗑 Supprimer la sélection", command=self._delete_selected)
         self.btn_delete_selected.pack(side="right", padx=4)
         ttk.Button(bar, text="⬇ Exporter (Excel)", command=self._export_view).pack(side="right", padx=4)
@@ -1100,6 +1104,8 @@ class App(tk.Tk):
         menu.add_command(label="➕ Ajouter un sinistre", command=self._add_record, state=state_create)
         menu.add_command(label="✏ Modifier ce sinistre", command=self._edit_record, state=state_edit)
         menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
+        menu.add_command(label="📎 Gérer les pièces jointes / photos du dossier", command=self._show_pieces_jointes, state=state_action)
+        menu.add_command(label="📦 Exporter fiches Word (.docx) du lot sélectionné", command=self._export_word_batch, state=state_action)
         menu.add_command(label="📎 Charger modèle Word (.doc / .docx)", command=self._load_word_template)
         menu.add_separator()
         menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
@@ -1190,6 +1196,77 @@ class App(tk.Tk):
                 messagebox.showwarning("Format Word .doc", msg)
         except Exception as e:
             messagebox.showerror("Erreur de chargement", f"Impossible de charger le modèle Word :\n{e}")
+
+    def _show_pieces_jointes(self):
+        """Ouvre l'écran de gestion du dossier documentaire (pièces jointes) du sinistre sélectionné."""
+        sel = self.tree_sinistres.selection()
+        if not sel:
+            messagebox.showinfo("Sélection", "Veuillez sélectionner un sinistre pour voir/gérer ses pièces jointes.")
+            return
+        if len(sel) > 1:
+            messagebox.showinfo("Sélection", "Veuillez sélectionner un seul sinistre à la fois pour les pièces jointes.")
+            return
+        rid = int(self.tree_sinistres.item(sel[0])["values"][0])
+        with db.db_connection() as conn:
+            row = conn.execute("SELECT * FROM sinistres WHERE id=?", (rid,)).fetchone()
+        if not row:
+            messagebox.showwarning("Sinistre introuvable", "Le sinistre sélectionné est introuvable en base.")
+            return
+        PiecesJointesDialog(self, record=dict(row), current_user=self.current_user)
+
+    def _export_word_batch(self):
+        """Exporte les fiches de sinistre en lots (publipostage Word .docx) pour tous
+        les dossiers actuellement sélectionnés dans le tableau."""
+        sel = self.tree_sinistres.selection()
+        if not sel:
+            messagebox.showinfo("Sélection vide", "Veuillez sélectionner au moins un sinistre (ou tous avec Ctrl+A) "
+                                                  "dans le tableau pour exporter les fiches Word par lots.")
+            return
+        ids = self._get_selected_ids()
+        all_records = {r["id"]: r for r in db.fetch_all()}
+        records_to_export = [all_records[rid] for rid in ids if rid in all_records]
+        if not records_to_export:
+            return
+
+        dest_dir = filedialog.askdirectory(
+            parent=self,
+            title=f"Sélectionner le dossier d'export pour {len(records_to_export)} fiche(s) Word (.docx)"
+        )
+        if not dest_dir:
+            return
+
+        import fiche_sinistre_word as f_word
+        success_count = 0
+        errors = 0
+        for rec in records_to_export:
+            try:
+                data = fiche.record_to_fiche_data(rec)
+                clean_name = fiche.fiche_filename(rec).replace(".pdf", ".docx")
+                out_path = os.path.join(dest_dir, clean_name)
+                f_word.build_fiche_word(data, out_path)
+                success_count += 1
+            except Exception as e:
+                logger.warning("Erreur d'export Word par lot pour le dossier %s : %s", rec.get("id"), e)
+                errors += 1
+
+        db.log_action(self.current_user, "EXPORT_WORD_LOT",
+                      dossier_label=f"{success_count} dossier(s)",
+                      nouvelle_valeur={"dossier_destination": dest_dir})
+
+        msg = f"✓ Export terminé : {success_count} fiche(s) Word (.docx) générée(s) dans :\n{dest_dir}"
+        if errors > 0:
+            msg += f"\n\n({errors} dossier(s) n'ont pas pu être générés)."
+        if messagebox.askyesno("Export Word par lots réussi",
+                               msg + "\n\nVoulez-vous ouvrir le dossier de réception dans l'explorateur ?",
+                               parent=self):
+            try:
+                if os.name == "nt":
+                    os.startfile(dest_dir)
+                else:
+                    import subprocess
+                    subprocess.run(["xdg-open", dest_dir], check=False)
+            except Exception:
+                pass
 
     def _delete_selected(self):
         if not self.has_permission("delete"):
@@ -2397,6 +2474,148 @@ class TemplateCalibrationDialog(tk.Toplevel):
                     subprocess.run(["xdg-open", out_path], check=False)
         except Exception as e:
             messagebox.showerror("Erreur de génération test", f"Impossible de générer le test :\n{e}", parent=self)
+
+
+class PiecesJointesDialog(tk.Toplevel):
+    """Fenêtre de gestion des pièces jointes / dossier documentaire numérique
+    associé à un sinistre (photos, devis, scan de PV, constat, etc.)."""
+
+    def __init__(self, parent, record, current_user=None):
+        super().__init__(parent)
+        self.app = parent
+        self.record = record
+        self.current_user = current_user
+
+        label = parent._record_label(record)
+        self.title(f"📎 Pièces jointes du sinistre — {label}")
+        self.geometry("700x480")
+        self.minsize(580, 360)
+
+        import pieces_jointes as pj
+        self.pj = pj
+
+        header = tk.Frame(self, bg=COLOR_PRIMARY)
+        header.pack(fill="x")
+        tk.Label(header, text="📁 DOSSIER NUMÉRIQUE & PIÈCES JOINTES",
+                 bg=COLOR_PRIMARY, fg="white", font=("Segoe UI", 12, "bold")).pack(pady=(12, 2))
+        tk.Label(header, text=f"Dossier : {label}  |  Chauffeur : {record.get('chauffeur') or '?'}",
+                 bg=COLOR_PRIMARY, fg="#cfe0ff", font=("Segoe UI", 9)).pack(pady=(0, 10))
+
+        # ---- Barre de boutons en haut ----
+        top_bar = tk.Frame(self, bg=COLOR_BG)
+        top_bar.pack(fill="x", padx=16, pady=8)
+
+        ttk.Button(top_bar, text="➕ Ajouter un fichier...", command=self._add_file).pack(side="left", padx=4)
+        ttk.Button(top_bar, text="📂 Ouvrir le fichier", command=self._open_selected).pack(side="left", padx=4)
+        ttk.Button(top_bar, text="📁 Ouvrir dans l'explorateur Windows", command=self._open_explorer).pack(side="left", padx=4)
+        ttk.Button(top_bar, text="🗑 Supprimer", command=self._delete_selected).pack(side="right", padx=4)
+
+        # ---- Liste des fichiers ----
+        frame_list = tk.Frame(self, bg=COLOR_CARD)
+        frame_list.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+
+        cols = ("name", "ext", "size")
+        self.tree = ttk.Treeview(frame_list, columns=cols, show="headings", selectmode="browse")
+        self.tree.heading("name", text="Nom du fichier")
+        self.tree.heading("ext", text="Type")
+        self.tree.heading("size", text="Taille (Ko)")
+
+        self.tree.column("name", width=360, anchor="w")
+        self.tree.column("ext", width=100, anchor="center")
+        self.tree.column("size", width=100, anchor="e")
+
+        vsb = ttk.Scrollbar(frame_list, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        self.tree.pack(side="left", fill="both", expand=True)
+
+        self.tree.bind("<Double-1>", lambda e: self._open_selected())
+
+        # ---- Bas de fenêtre ----
+        footer = tk.Frame(self, bg=COLOR_BG)
+        footer.pack(fill="x", padx=16, pady=(0, 12))
+        self.lbl_status = tk.Label(footer, text="", bg=COLOR_BG, fg="#555555", font=("Segoe UI", 9))
+        self.lbl_status.pack(side="left")
+        ttk.Button(footer, text="Fermer", command=self.destroy).pack(side="right")
+
+        self._refresh_list()
+
+    def _refresh_list(self):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+        items = self.pj.list_attachments(self.record)
+        for idx, item in enumerate(items):
+            self.tree.insert("", "end", iid=str(idx),
+                             values=(item["name"], item["ext"], str(item["size_kb"])),
+                             tags=(item["path"],))
+        self.lbl_status.configure(text=f"{len(items)} fichier(s) dans le dossier numérique.")
+
+    def _add_file(self):
+        paths = filedialog.askopenfilenames(
+            parent=self,
+            title="Sélectionner des documents ou photos à joindre",
+            filetypes=[("Tous les fichiers supportés", "*.*"),
+                       ("Images (*.jpg, *.png, *.webp)", "*.jpg;*.jpeg;*.png;*.webp"),
+                       ("Documents (*.pdf, *.doc, *.docx, *.xls, *.xlsx)", "*.pdf;*.doc;*.docx;*.xls;*.xlsx")]
+        )
+        if not paths:
+            return
+        added = 0
+        for p in paths:
+            if self.pj.add_attachment(self.record, p):
+                added += 1
+        self._refresh_list()
+        if added:
+            messagebox.showinfo("Ajout terminé", f"✓ {added} fichier(s) joint(s) au sinistre avec succès !", parent=self)
+
+    def _get_selected_path(self):
+        sel = self.tree.selection()
+        if not sel:
+            return None, None
+        item = self.tree.item(sel[0])
+        name = item["values"][0]
+        fpath = item["tags"][0] if item.get("tags") else os.path.join(self.pj.get_dossier_dir(self.record), name)
+        return name, fpath
+
+    def _open_selected(self):
+        name, fpath = self._get_selected_path()
+        if not fpath or not os.path.exists(fpath):
+            messagebox.showinfo("Sélection", "Veuillez sélectionner un fichier existant à ouvrir.", parent=self)
+            return
+        try:
+            if os.name == "nt":
+                os.startfile(fpath)
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", fpath], check=False)
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir le fichier :\n{e}", parent=self)
+
+    def _open_explorer(self):
+        folder = self.pj.get_dossier_dir(self.record, create=True)
+        try:
+            if os.name == "nt":
+                os.startfile(folder)
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", folder], check=False)
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir le dossier Windows :\n{e}", parent=self)
+
+    def _delete_selected(self):
+        name, _ = self._get_selected_path()
+        if not name:
+            messagebox.showinfo("Sélection", "Veuillez sélectionner un fichier à supprimer.", parent=self)
+            return
+        if not messagebox.askyesno("Supprimer la pièce jointe",
+                                   f"Êtes-vous sûr de vouloir supprimer définitivement « {name} » du dossier du sinistre ?",
+                                   parent=self):
+            return
+        if self.pj.delete_attachment(self.record, name):
+            self._refresh_list()
+            messagebox.showinfo("Suppression", f"Fichier « {name} » supprimé.", parent=self)
+        else:
+            messagebox.showerror("Erreur", "Impossible de supprimer le fichier.", parent=self)
 
 
 class FicheSinistreDialog(tk.Toplevel):

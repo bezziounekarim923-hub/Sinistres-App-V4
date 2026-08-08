@@ -209,6 +209,11 @@ L'application permet de générer la fiche de sinistre de plusieurs façons :
 3. **Mode dessiné (secours)** :
    - Si aucun modèle n'est importé, l'application redessine une fiche A4 propre (en-tête organisme, champs, signatures).
 
+### Nouveautés : Pièces Jointes & Export Word par Lots
+
+- **📎 Gestion documentaire par sinistre (Pièces jointes)** : Depuis le tableau des sinistres (clic droit ou bouton en haut), vous pouvez joindre, ouvrir et gérer tous les documents réels d'un dossier (photos de dégâts, scan du PV de gendarmerie, permis, devis...) classés automatiquement dans `Documents_Sinistres/`.
+- **📦 Export Word par lots (Publipostage)** : Sélectionnez un ou plusieurs sinistres dans la liste et cliquez sur **« 📦 Export Word (Lot) »** pour générer d'un coup l'ensemble des fiches Word (.docx) remplies dans le dossier de votre choix.
+
 ---
 
 ## 🕑 Journal des opérations et tableau de bord Administration
