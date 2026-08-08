@@ -232,8 +232,20 @@ def _match_field_key(norm_text):
     return None
 
 
+def _safe_replace_or_set_text(p, new_text):
+    """Remplace le texte d'un paragraphe docx.Paragraph en conservant 100%
+    du formatage existant (police, taille, gras, italique, couleur, alignement)."""
+    if len(p.runs) > 0:
+        p.runs[0].text = str(new_text)
+        for r in p.runs[1:]:
+            r.text = ""
+    else:
+        p.add_run(str(new_text))
+
+
 def _fill_paragraph_if_match(p, filled_fields, get_val_fn):
-    """Analyse un paragraphe et le remplit si c'est un libellé suivi de pointillés/deux-points."""
+    """Analyse un paragraphe et le remplit si c'est un libellé suivi de pointillés/deux-points,
+    en conservant 100% de la mise en forme d'origine (police, taille, gras...)."""
     text = p.text.strip()
     if not text or len(text) < 4:
         return
@@ -245,11 +257,11 @@ def _fill_paragraph_if_match(p, filled_fields, get_val_fn):
             return
         if ":" in p.text:
             label_part = p.text.split(":", 1)[0].strip()
-            p.text = f"{label_part} : {val}"
+            _safe_replace_or_set_text(p, f"{label_part} : {val}")
             filled_fields.add(field_key)
         elif ".." in p.text or "__" in p.text:
             label_part = re.split(r"(\.\.+|__+)", p.text)[0].strip()
-            p.text = f"{label_part} : {val}"
+            _safe_replace_or_set_text(p, f"{label_part} : {val}")
             filled_fields.add(field_key)
 
 
@@ -262,7 +274,8 @@ def auto_scan_and_fill_word_doc(doc, data):
          en analysant le texte de la colonne de gauche (ex: 'Date de sinistre :',
          'Chauffeur', 'Immatriculation', 'PV', 'Dégâts', etc.).
        - Insère automatiquement la valeur du sinistre dans la colonne de droite (ou
-         à la suite du libellé dans la cellule).
+         à la suite du libellé dans la cellule) en conservant 100% de la mise en page
+         et des tailles de police d'origine du fichier.
     2. Parcourt tous les paragraphes du document (doc.paragraphs) :
        - Détecte le titre de la fiche ('FICHE DE SINISTRE') et ajoute le n° de fiche.
        - Détecte les libellés sous forme 'Libellé : .......' et insère la valeur après
@@ -288,9 +301,12 @@ def auto_scan_and_fill_word_doc(doc, data):
                 if field_key and field_key not in filled_fields:
                     val = get_val_for_key(field_key)
                     if val:
-                        right_cell.text = val
-                        if len(right_cell.paragraphs) > 0 and len(right_cell.paragraphs[0].runs) > 0:
-                            right_cell.paragraphs[0].runs[0].font.name = "Arial"
+                        if len(right_cell.paragraphs) > 0:
+                            _safe_replace_or_set_text(right_cell.paragraphs[0], val)
+                            for extra_p in right_cell.paragraphs[1:]:
+                                _safe_replace_or_set_text(extra_p, "")
+                        else:
+                            right_cell.text = val
                         filled_fields.add(field_key)
             elif len(row.cells) == 1:
                 _fill_paragraph_if_match(row.cells[0].paragraphs[0], filled_fields, get_val_for_key)
@@ -306,12 +322,12 @@ def auto_scan_and_fill_word_doc(doc, data):
             norm_p = _normalize_text(p.text)
             if "fiche de sinistre" in norm_p and num_plain not in p.text:
                 if ":" in p.text:
-                    p.text = p.text.split(":", 1)[0] + " : " + num_plain
+                    new_txt = p.text.split(":", 1)[0] + " : " + num_plain
                 elif "n°" in p.text.lower() or "n " in norm_p:
-                    new_t = re.sub(r"(?i)(n°|n)\s*([0-9/.\-_]*)", f"n° {num_plain}", p.text)
-                    p.text = new_t
+                    new_txt = re.sub(r"(?i)(n°|n)\s*([0-9/.\-_]*)", f"n° {num_plain}", p.text)
                 else:
-                    p.text = p.text.strip() + f" n° {num_plain}"
+                    new_txt = p.text.strip() + f" n° {num_plain}"
+                _safe_replace_or_set_text(p, new_txt)
                 break
 
 

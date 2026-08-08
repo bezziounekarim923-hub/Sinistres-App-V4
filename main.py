@@ -890,12 +890,8 @@ class App(tk.Tk):
         self.btn_edit.pack(side="right", padx=4)
         self.btn_fiche = ttk.Button(bar, text="📄 Générer la fiche", command=self._generate_fiche)
         self.btn_fiche.pack(side="right", padx=4)
-        self.btn_load_template = ttk.Button(bar, text="📎 Charger modèle PDF", command=self._load_fiche_template)
-        self.btn_load_template.pack(side="right", padx=4)
         self.btn_word_template = ttk.Button(bar, text="📎 Modèle Word (.doc / .docx)", command=self._load_word_template)
         self.btn_word_template.pack(side="right", padx=4)
-        self.btn_calibrate = ttk.Button(bar, text="📐 Calibrer modèle", command=self._open_template_calibration)
-        self.btn_calibrate.pack(side="right", padx=4)
         self.btn_delete_selected = ttk.Button(bar, text="🗑 Supprimer la sélection", command=self._delete_selected)
         self.btn_delete_selected.pack(side="right", padx=4)
         ttk.Button(bar, text="⬇ Exporter (Excel)", command=self._export_view).pack(side="right", padx=4)
@@ -1104,9 +1100,7 @@ class App(tk.Tk):
         menu.add_command(label="➕ Ajouter un sinistre", command=self._add_record, state=state_create)
         menu.add_command(label="✏ Modifier ce sinistre", command=self._edit_record, state=state_edit)
         menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
-        menu.add_command(label="📎 Charger modèle PDF original", command=self._load_fiche_template)
         menu.add_command(label="📎 Charger modèle Word (.doc / .docx)", command=self._load_word_template)
-        menu.add_command(label="📐 Calibrer positions du modèle PDF", command=self._open_template_calibration)
         menu.add_separator()
         menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
 
@@ -2495,13 +2489,10 @@ class FicheSinistreDialog(tk.Toplevel):
         # ---- Barre d'actions ----
         actions = tk.Frame(self, bg=COLOR_BG)
         actions.pack(fill="x", padx=16, pady=(0, 14))
-        ttk.Button(actions, text="💾 Enregistrer PDF", command=self._save_pdf).pack(side="left", padx=4)
         ttk.Button(actions, text="📝 Enregistrer Word (.docx)", command=self._save_word).pack(side="left", padx=4)
-        ttk.Button(actions, text="🖨 Imprimer", command=self._print).pack(side="left", padx=4)
         ttk.Button(actions, text="📎 Modèle Word (.doc / .docx)", command=self._load_word_template).pack(side="left", padx=4)
         ttk.Button(actions, text="📥 Créer modèle Word (.docx)", command=self._create_word_template).pack(side="left", padx=4)
-        ttk.Button(actions, text="📎 Charger modèle original (PDF)", command=self._load_original_template).pack(side="left", padx=4)
-        ttk.Button(actions, text="📐 Calibrer modèle", command=self._open_template_calibration).pack(side="left", padx=4)
+        ttk.Button(actions, text="🖨 Imprimer", command=self._print).pack(side="left", padx=4)
         if self.can_edit:
             ttk.Button(actions, text="📥 Enregistrer dans le sinistre",
                        command=self._save_back_to_record).pack(side="left", padx=4)
