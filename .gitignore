@@ -28,4 +28,6 @@ fiche_config.json
 # Fichiers de build
 build/
 dist/
+release/
 *.spec
+Documents_Sinistres/

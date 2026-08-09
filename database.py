@@ -63,7 +63,8 @@ def _migrate_app_files(src_dir, dst_dir):
         os.makedirs(dst_dir, exist_ok=True)
     except OSError:
         return
-    for fname in (DB_NAME, "license.json", "license_master.json", "status_colors.json"):
+    for fname in (DB_NAME, "license.json", "license_master.json", "status_colors.json",
+                  "fiche_template_fields.json", "FICHE_DE_SINISTRE_MODELE.pdf", "FICHE_DE_SINISTRE_MODELE.docx"):
         src = os.path.join(src_dir, fname)
         dst = os.path.join(dst_dir, fname)
         if os.path.exists(src) and not os.path.exists(dst):
@@ -71,26 +72,45 @@ def _migrate_app_files(src_dir, dst_dir):
                 shutil.copy2(src, dst)
             except OSError:
                 pass
+    for dname in ("backups", "Documents_Sinistres", "Fiches"):
+        src = os.path.join(src_dir, dname)
+        dst = os.path.join(dst_dir, dname)
+        if os.path.exists(src) and not os.path.exists(dst):
+            try:
+                shutil.copytree(src, dst)
+            except OSError:
+                pass
+
+
+def _is_program_files(path):
+    """Renvoie True si le chemin est dans Program Files (Windows)."""
+    if not sys.platform.startswith("win"):
+        return False
+    abs_path = os.path.abspath(path).lower()
+    pf = os.environ.get("ProgramFiles", r"c:\program files").lower()
+    pf86 = os.environ.get("ProgramFiles(x86)", r"c:\program files (x86)").lower()
+    return abs_path.startswith(pf) or abs_path.startswith(pf86)
 
 
 def _resolve_app_dir(legacy_dir, is_frozen):
-    """Choisit le dossier d'application inscriptible.
+    """Choisit le dossier d'application inscriptible pour les données utilisateur.
 
     - En mode script (dev/tests, ``is_frozen`` faux) : on reste à côté du script
       (comportement historique), qu'il soit inscriptible ou non — les tests et le
       développement reposent sur ce repère stable.
-    - En mode .exe compilé : si le dossier de l'exécutable est inscriptible, on
-      l'utilise (rétro-compatibilité : données déjà présentes à côté du .exe).
-      Sinon (ex. « Program Files »), on bascule sur le dossier de données
-      utilisateur et on y migre les fichiers existants une seule fois.
+    - En mode .exe compilé : si l'installation se trouve dans Program Files (ou dans
+      un répertoire non inscriptible par l'utilisateur courant), on bascule sur
+      le dossier de données utilisateur (%APPDATA%\\SinistresApp sous Windows) et
+      on y migre les fichiers existants une seule fois. Sinon, on utilise le dossier
+      de l'exécutable (rétro-compatibilité portable).
     """
     if not is_frozen:
         return legacy_dir
-    if _is_writable(legacy_dir):
-        return legacy_dir
-    new_dir = _user_data_dir()
-    _migrate_app_files(legacy_dir, new_dir)
-    return new_dir
+    if _is_program_files(legacy_dir) or not _is_writable(legacy_dir):
+        new_dir = _user_data_dir()
+        _migrate_app_files(legacy_dir, new_dir)
+        return new_dir
+    return legacy_dir
 
 
 def get_app_dir():
@@ -237,7 +257,9 @@ def _prune_backups(backup_dir, keep=MAX_BACKUPS):
         return
     if len(files) <= keep:
         return
-    files.sort(key=lambda f: os.path.getmtime(os.path.join(backup_dir, f)))
+    files.sort(key=lambda f: (os.path.getmtime(os.path.join(backup_dir, f)),
+                              0 if "_old_" in f else 1,
+                              f))
     for f in files[:len(files) - keep]:
         try:
             os.remove(os.path.join(backup_dir, f))

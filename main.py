@@ -39,7 +39,8 @@ from date_utils import (
     calculate_reglement_delay,
 )
 
-APP_TITLE = "Suivi des Sinistres — Tableau de bord"
+APP_VERSION = "4.0.0"
+APP_TITLE = f"Suivi des Sinistres (v{APP_VERSION}) — Tableau de bord"
 COLOR_BG = "#f4f6f9"
 COLOR_PRIMARY = "#1f3a5f"
 COLOR_ACCENT = "#2f6fed"
@@ -3695,6 +3696,12 @@ class SettingsDialog(tk.Toplevel):
         btn_row.pack(pady=10)
         ttk.Button(btn_row, text="💾 Enregistrer", command=self._save).pack(side="left", padx=6)
         ttk.Button(btn_row, text="Fermer", command=self.destroy).pack(side="left", padx=6)
+
+        lbl_ver = tk.Label(self,
+                           text=f"Sinistres App • Version {APP_VERSION} (Édition Autonome Windows)\n"
+                                f"Dossier données utilisateur : {db.get_app_dir()}",
+                           fg="#777777", font=("Segoe UI", 8), justify="center")
+        lbl_ver.pack(side="bottom", pady=(0, 8))
 
     def _browse_path(self):
         path = filedialog.askopenfilename(filetypes=[("Fichier Excel", "*.xlsx *.xls")])

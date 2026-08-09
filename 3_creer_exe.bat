@@ -1,20 +1,18 @@
 @echo off
-echo ============================================
-echo   Creation du fichier .exe autonome
-echo ============================================
-echo Cette operation peut prendre 1 a 3 minutes...
+echo =============================================================
+echo   CREATION DE L'INSTALLATEUR WINDOWS OFFICIEL (Setup.exe)
+echo =============================================================
 echo.
-python -m PyInstaller --noconfirm --onefile --windowed --name "SuiviSinistres" main.py
+python build_release.py all
 echo.
-if exist "dist\SuiviSinistres.exe" (
-    echo ============================================
-    echo   TERMINE !
-    echo   Votre application se trouve dans :
-    echo   dist\SuiviSinistres.exe
-    echo   Vous pouvez la copier ou en creer un
-    echo   raccourci sur le Bureau.
-    echo ============================================
+if exist "release\Sinistres-App-Setup.exe" (
+    echo =============================================================
+    echo   TERMINE AVEC SUCCES !
+    echo   Votre installateur unique pour distribution se trouve ici :
+    echo   release\Sinistres-App-Setup.exe
+    echo =============================================================
 ) else (
-    echo Une erreur s'est produite. Verifiez les messages ci-dessus.
+    echo NOTE : Verifiez les messages ci-dessus. Le dossier dist\windows\Sinistres App
+    echo est pret, et Inno Setup peut etre lance pour generer Sinistres-App-Setup.exe.
 )
 pause

@@ -1,24 +1,63 @@
-# Application SUIVI DES SINISTRES
+# Logiciel SINISTRES APP (v4.0.0) — Édition Autonome Windows
 
-Application de bureau pour gérer et analyser vos sinistres de véhicules
-(remplace et améliore votre fichier Excel).
-
-## 🧩 Contenu du dossier
-
-| Fichier | Rôle |
-|---|---|
-| `main.py` | L'application (interface graphique) |
-| `database.py` | Gestion de la base de données |
-| `importer.py` | Import des fichiers Excel |
-| `analytics.py` | Calculs statistiques |
-| `requirements.txt` | Liste des composants nécessaires |
-| `1_installer.bat` | À lancer UNE SEULE FOIS pour installer |
-| `2_lancer_app.bat` | Pour lancer l'application (sans créer de .exe) |
-| `3_creer_exe.bat` | Pour créer un fichier `.exe` autonome |
+Logiciel professionnel de gestion, suivi documentaire et analyse des sinistres de véhicules.
 
 ---
 
-## 🚀 Installation (à faire une seule fois)
+## 💎 1. DISTRIBUTION UTILISATEUR FINAL (Logiciel Windows Autonome)
+
+L'utilisateur final n'a **pas besoin d'installer Python, pip ou la moindre dépendance**.  
+Il reçoit un unique fichier d'installation officiel :
+* **`Sinistres-App-Setup.exe`**
+
+### Expérience utilisateur sous Windows :
+1. Double-cliquez sur `Sinistres-App-Setup.exe`.
+2. Suivez l'assistant d'installation (en français, semblable à VLC ou 7-Zip).
+3. Un raccourci est automatiquement créé sur le Bureau et dans le Menu Démarrer.
+4. Lancez **Sinistres App** : l'application fonctionne immédiatement.
+
+### Sécurité et préservation des données :
+* **Fichiers du programme** : Installés dans `C:\Program Files\Sinistres App\` (protégés en écriture).
+* **Données utilisateur** : Toutes vos bases de données (`sinistres.db`), pièces jointes (`Documents_Sinistres/`), modèles Word d'entreprise (`FICHE_DE_SINISTRE_MODELE.docx`) et sauvegardes (`backups/`) sont systématiquement stockées dans votre répertoire personnel inscriptible :
+  ```
+  %APPDATA%\SinistresApp\
+  ```
+* **Mises à jour sans perte** : L'installation d'une nouvelle version (`4.1`, `4.2`, etc.) ou la désinstallation via *Paramètres Windows > Applications* n'efface jamais vos données personnelles dans `%APPDATA%\SinistresApp\`.
+
+---
+
+## 🛠 2. COMPILATION ET BUILD REPRODUCTIBLE (Pour les développeurs)
+
+Un pipeline complet, automatisé et reproductible est intégré pour générer l'installateur Windows.
+
+### Exécuter le build complet en 1 clic (Windows) :
+Double-cliquez sur **`build_release.bat`** (ou lancez `python build_release.py all` dans votre terminal).  
+Le pipeline exécute 4 étapes vérifiées :
+1. **`clean`** : Nettoyage des dossiers temporaires (`build/`, `dist/`, `release/`).
+2. **`compile`** : Vérification de la syntaxe et exécution de **l'intégralité des 68 tests unitaires** du projet (`run_tests.py`).
+3. **`package`** : Création de l'application autonome via **PyInstaller** en mode `--onedir` (`dist/windows/Sinistres App/`) avec tous les hooks (`sqlite3`, `docx`, `win32com`, `tkinter`, `openpyxl`).
+4. **`installer`** : Compilation du script **Inno Setup** (`installer/Sinistres-App.iss`) pour produire le livrable final :
+   ```
+   release\Sinistres-App-Setup.exe
+   ```
+
+---
+
+## 🧩 Contenu du code source (Développement)
+
+| Fichier / Dossier | Rôle |
+|---|---|
+| `main.py` | L'application (interface graphique et logique principale) |
+| `database.py` | Base de données SQLite et gestion sécurisée des chemins `%APPDATA%` |
+| `fiche_sinistre_word.py` | Scanner intelligent et générateur de fiches Word (`.doc` & `.docx`) |
+| `pieces_jointes.py` | Gestionnaire de pièces jointes (dossier documentaire du sinistre) |
+| `importer.py` / `analytics.py` | Import Excel et analyses KPI / alertes |
+| `build_release.py` / `.bat` | Pipeline de build reproductible |
+| `installer/Sinistres-App.iss` | Script officiel pour Inno Setup 6 (`Sinistres-App-Setup.exe`) |
+
+---
+
+## 🚀 Installation manuelle en mode Python (Optionnel, pour développement)
 
 ### Étape 1 — Installer Python
 Si Python n'est pas déjà installé sur le PC :
