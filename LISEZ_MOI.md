@@ -24,6 +24,13 @@ Il reçoit un unique fichier d'installation officiel :
   ```
 * **Mises à jour sans perte** : L'installation d'une nouvelle version (`4.1`, `4.2`, etc.) ou la désinstallation via *Paramètres Windows > Applications* n'efface jamais vos données personnelles dans `%APPDATA%\SinistresApp\`.
 
+### 🔑 Activation Client (Licence 1 an + Compte utilisateur) — Réservé à l'Éditeur :
+Pour distribuer le logiciel à un client ou collègue sans qu'il puisse devenir Administrateur :
+1. Sur votre poste Administrateur : allez dans **Administration > Gestion des utilisateurs**.
+2. Cliquez sur **« 🎁 Exporter accès client (.sini) »** : choisissez le nom d'utilisateur, le rôle (`Gestionnaire` ou `Consultation`), un mot de passe et la durée de la licence (`365` pour 1 an).
+3. Envoyez à votre client : `Sinistres-App-Setup.exe` **+** le fichier `Acces_NomClient_365j.sini`.
+4. Au premier lancement sur son PC, le client choisit **« 🔑 Activation Utilisateur (.sini) »** et sélectionne ce fichier : sa licence de 1 an est activée, son compte `Gestionnaire` est créé, et l'accès Administrateur est protégé et réservé à l'éditeur !
+
 ---
 
 ## 🛠 2. COMPILATION ET BUILD REPRODUCTIBLE (Pour les développeurs)
