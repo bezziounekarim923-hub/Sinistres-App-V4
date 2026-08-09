@@ -243,6 +243,21 @@ def backup_db():
     backup_path = os.path.join(backup_dir, f"sinistres_backup_{timestamp}.db")
     shutil.copy2(db_path, backup_path)
     _prune_backups(backup_dir)
+
+    # Sauvegarde miroir externe si configurée (clé USB, réseau, cloud)
+    try:
+        settings_file = os.path.join(get_app_dir(), "settings.json")
+        if os.path.exists(settings_file):
+            with open(settings_file, "r", encoding="utf-8") as fh:
+                st = json.load(fh)
+                mirror_dir = st.get("mirror_backup_dir")
+                if mirror_dir and os.path.exists(mirror_dir):
+                    mirror_path = os.path.join(mirror_dir, f"sinistres_backup_{timestamp}.db")
+                    shutil.copy2(db_path, mirror_path)
+                    _prune_backups(mirror_dir, keep=20)
+    except Exception as e:
+        logger.debug("Échec de la sauvegarde miroir externe : %s", e)
+
     return backup_path
 
 

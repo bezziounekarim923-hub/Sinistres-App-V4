@@ -1108,6 +1108,8 @@ class App(tk.Tk):
         menu.add_command(label="📄 Générer la fiche", command=self._generate_fiche, state=state_action)
         menu.add_command(label="📎 Gérer les pièces jointes / photos du dossier", command=self._show_pieces_jointes, state=state_action)
         menu.add_command(label="📦 Exporter fiches Word (.docx) du lot sélectionné", command=self._export_word_batch, state=state_action)
+        menu.add_command(label="👤 Fiche Chauffeur (Relevé de sinistralité & Word)", command=self._show_chauffeur_profile, state=state_action)
+        menu.add_command(label="🚛 Historique du Véhicule (Immatriculation)", command=self._show_vehicule_profile, state=state_action)
         menu.add_command(label="📎 Charger modèle Word (.doc / .docx)", command=self._load_word_template)
         menu.add_separator()
         menu.add_command(label="🗑 Supprimer la sélection", command=self._delete_selected, state=state_delete)
@@ -1269,6 +1271,36 @@ class App(tk.Tk):
                     subprocess.run(["xdg-open", dest_dir], check=False)
             except Exception:
                 pass
+
+    def _show_chauffeur_profile(self):
+        sel = self.tree_sinistres.selection()
+        if not sel:
+            messagebox.showinfo("Sélection", "Veuillez sélectionner une ligne pour voir le relevé du chauffeur.")
+            return
+        rid = int(self.tree_sinistres.item(sel[0])["values"][0])
+        with db.db_connection() as conn:
+            row = conn.execute("SELECT chauffeur FROM sinistres WHERE id=?", (rid,)).fetchone()
+        chauf = (row["chauffeur"] if row else "").strip() if row and row["chauffeur"] else ""
+        if not chauf:
+            messagebox.showinfo("Chauffeur inconnu", "Aucun nom de chauffeur renseigné pour ce dossier.")
+            return
+        ChauffeurProfileDialog(self, chauf)
+
+    def _show_vehicule_profile(self):
+        sel = self.tree_sinistres.selection()
+        if not sel:
+            messagebox.showinfo("Sélection", "Veuillez sélectionner une ligne pour voir l'historique du véhicule.")
+            return
+        rid = int(self.tree_sinistres.item(sel[0])["values"][0])
+        with db.db_connection() as conn:
+            row = conn.execute("SELECT immatriculation, matricule_vehicule FROM sinistres WHERE id=?", (rid,)).fetchone()
+        immat = ""
+        if row:
+            immat = (row["immatriculation"] or row["matricule_vehicule"] or "").strip()
+        if not immat:
+            messagebox.showinfo("Véhicule inconnu", "Aucune immatriculation renseignée pour ce dossier.")
+            return
+        VehiculeProfileDialog(self, immat)
 
     def _delete_selected(self):
         if not self.has_permission("delete"):
@@ -3867,6 +3899,13 @@ class SettingsDialog(tk.Toplevel):
         self.cb_sync.set("Immédiate (à chaque modification)" if parent.auto_sync_enabled else "Manuelle uniquement")
         self.cb_sync.pack(anchor="w", padx=14)
 
+        tk.Label(tab_general, text="Sauvegarde miroir externe (Clé USB / Réseau / Cloud) :", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=14, pady=(14, 2))
+        mirror_row = tk.Frame(tab_general)
+        mirror_row.pack(fill="x", padx=14)
+        self.lbl_mirror = tk.Label(mirror_row, text=self.settings.get("mirror_backup_dir") or "(non configuré)", fg="#555", wraplength=380, justify="left")
+        self.lbl_mirror.pack(side="left", fill="x", expand=True)
+        ttk.Button(mirror_row, text="Choisir dossier...", command=self._browse_mirror).pack(side="right")
+
         # --- Onglet Couleurs des statuts ---
         tab_colors = tk.Frame(notebook)
         notebook.add(tab_colors, text="Couleurs des statuts")
@@ -3900,6 +3939,12 @@ class SettingsDialog(tk.Toplevel):
             self.app._save_source_workbook_path(path)
             self.app.source_mtime = self.app._get_source_mtime()
             self.lbl_path.config(text=path)
+
+    def _browse_mirror(self):
+        path = filedialog.askdirectory(title="Choisir le dossier pour la copie miroir externe des sauvegardes")
+        if path:
+            self.settings["mirror_backup_dir"] = path
+            self.lbl_mirror.config(text=path)
 
     def _pick_color(self, statut, swatch_widget):
         try:

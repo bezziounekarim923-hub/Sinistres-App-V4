@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import shutil
 import tempfile
 import unittest
@@ -113,6 +114,22 @@ class BackupRotationTests(unittest.TestCase):
         self.assertTrue(os.path.exists(bp))
         remaining = [f for f in os.listdir(bk) if f.startswith("sinistres_backup_")]
         self.assertLessEqual(len(remaining), db.MAX_BACKUPS)
+
+    def test_backup_db_runs_mirror(self):
+        tmp = tempfile.mkdtemp(prefix="sinistres_bk_mirror_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        mirror = os.path.join(tmp, "external_mirror")
+        os.makedirs(mirror, exist_ok=True)
+        with patch.object(db, "get_app_dir", lambda: tmp):
+            with open(os.path.join(tmp, db.DB_NAME), "w") as fh:
+                fh.write("dummy")
+            settings_path = os.path.join(tmp, "settings.json")
+            with open(settings_path, "w", encoding="utf-8") as fh:
+                json.dump({"mirror_backup_dir": mirror}, fh)
+            bp = db.backup_db()
+        self.assertIsNotNone(bp)
+        mirror_files = [f for f in os.listdir(mirror) if f.startswith("sinistres_backup_")]
+        self.assertEqual(len(mirror_files), 1)
 
 
 # ----------------------------------------------------------------- B5 : dossier inscriptible

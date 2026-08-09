@@ -31,6 +31,11 @@ Pour distribuer le logiciel à un client ou collègue sans qu'il puisse devenir 
 3. Envoyez à votre client : `Sinistres-App-Setup.exe` **+** le fichier `Acces_NomClient_365j.sini`.
 4. Au premier lancement sur son PC, le client choisit **« 🔑 Activation Utilisateur (.sini) »** et sélectionne ce fichier : sa licence de 1 an est activée, son compte `Gestionnaire` est créé, et l'accès Administrateur est protégé et réservé à l'éditeur !
 
+### Nouveautés : Relevé de Sinistralité Chauffeur / Flotte & Sauvegarde Miroir
+
+- **👤 Fiche Chauffeur & Relevé de Sinistralité (Word .docx)** : Depuis le menu contextuel (clic droit sur un sinistre), ouvrez le profil d'un chauffeur ou d'un véhicule pour voir ses statistiques (AVEC/SANS tiers, nombre d'accidents) et générez d'un clic un document officiel d'entreprise **« Relevé Individuel de Sinistralité Chauffeur (.docx) »**.
+- **☁️ Sauvegarde miroir externe (Clé USB / Cloud / Réseau)** : Dans **Paramètres > Général**, définissez un dossier de sauvegarde miroir externe. Chaque sauvegarde automatique de votre base sera instantanément dupliquée sur votre clé USB ou OneDrive pour vous prémunir contre toute panne matérielle !
+
 ---
 
 ## 🛠 2. COMPILATION ET BUILD REPRODUCTIBLE (Pour les développeurs)
