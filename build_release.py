@@ -51,9 +51,10 @@ def step_clean():
 
 def step_compile():
     log("Vérification de la syntaxe et exécution des tests unitaires...", "🧪")
+    import py_compile
     py_files = glob.glob(os.path.join(ROOT, "*.py"))
     for py_file in py_files:
-        subprocess.check_call([sys.executable, "-m", "py_compile", py_file])
+        py_compile.compile(py_file, doraise=True)
     print("   - Syntaxe Python vérifiée sur tous les modules.")
 
     log("Exécution de la suite de tests unitaires (run_tests.py)...", "⚙️")

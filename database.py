@@ -257,9 +257,7 @@ def _prune_backups(backup_dir, keep=MAX_BACKUPS):
         return
     if len(files) <= keep:
         return
-    files.sort(key=lambda f: (os.path.getmtime(os.path.join(backup_dir, f)),
-                              0 if "_old_" in f else 1,
-                              f))
+    files.sort(key=lambda f: (0 if "_old_" in f else 1, f))
     for f in files[:len(files) - keep]:
         try:
             os.remove(os.path.join(backup_dir, f))
