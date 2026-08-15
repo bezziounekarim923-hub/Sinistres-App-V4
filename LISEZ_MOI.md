@@ -24,12 +24,26 @@ Il reçoit un unique fichier d'installation officiel :
   ```
 * **Mises à jour sans perte** : L'installation d'une nouvelle version (`4.1`, `4.2`, etc.) ou la désinstallation via *Paramètres Windows > Applications* n'efface jamais vos données personnelles dans `%APPDATA%\SinistresApp\`.
 
-### 🔑 Activation Gestionnaire (compte + licence 1 an) — Réservé à l'Éditeur :
-Pour distribuer le logiciel à un gestionnaire/client sans qu'il puisse devenir Administrateur :
-1. Sur votre poste Administrateur : allez dans **Administration > Gestion des utilisateurs**.
-2. Cliquez sur **« 🎟️ Exporter licence (.sini) »** : indiquez le nom du gestionnaire et la durée de la licence (`365` pour 1 an).
-3. Envoyez à votre gestionnaire : `Sinistres-App-Setup.exe` **+** le fichier `Licence_NomGestionnaire_365j.sini`.
-4. Au premier lancement sur son PC, le gestionnaire choisit **« 📂 Créer mon compte et activer ma licence (.sini) »** : il saisit **son propre nom d'utilisateur et son mot de passe**, puis sélectionne le fichier de licence. Sa licence de 1 an est activée et son compte `Gestionnaire` est créé. L'accès Administrateur reste réservé à l'éditeur.
+### 👑 Session Administrateur (propriétaire) — Console dédiée :
+La session Administrateur est **totalement séparée** de l'application Gestionnaire :
+1. Lancez la **Console d'administration** : `5_console_admin.bat` (ou `python admin_console.py`). Elle demande le **nom d'utilisateur + mot de passe Administrateur** (définis au premier lancement).
+2. Depuis la console :
+   - **👥 Comptes Gestionnaire** : créer, réinitialiser le mot de passe, **désactiver/réactiver**, supprimer un compte ;
+   - **🎟️ Licences** : générer une licence (durée par défaut **1 an = 365 jours**, modifiable), consulter la date de création et d'expiration, **révoquer**, **régénérer**, et exporter la liste de révocation.
+3. Les identifiants Administrateur et la **clé privée de signature** ne sont **jamais** présents chez le Gestionnaire.
+
+### 🔑 Fichier de licence (.lic) — signature sécurisée :
+- Chaque licence est un fichier **`.lic`** (ex : `licence_gestionnaire_karim_365j.lic`) contenant : identifiant unique `LIC-XXXXXXXX`, compte lié, dates de création / début / expiration, durée, et une **signature Ed25519**.
+- La licence est signée avec la **clé privée** (réservée à l'Administrateur) et vérifiée avec la **clé publique** (distribuée avec l'application). Un Gestionnaire ne peut **ni forger, ni modifier, ni prolonger** une licence.
+- ⚠️ **Important** : conservez précieusement la clé privée `licensing_private_key.pem` (dans `%APPDATA%\SinistresApp\`). Si vous la perdez, les licences déjà émises ne seront plus vérifiables et vous devrez en régénérer de nouvelles.
+
+### 🧑‍💼 Installation chez un Gestionnaire :
+1. Le Gestionnaire installe `Sinistres-App-Setup.exe` (aucun Python / Visual Studio requis).
+2. Au premier lancement, l'écran **« Activation de Sinistres App »** demande : **nom d'utilisateur**, **mot de passe**, **fichier de licence (.lic)**.
+3. Il clique **« Activer l'application »** : l'application vérifie le fichier (existence, signature, absence de modification, correspondance avec le compte, non-révocation, période de validité).
+4. En cas de licence invalide, un message clair s'affiche (expirée / modifiée / révoquée / mauvaise licence…).
+5. Après activation, le Gestionnaire utilise normalement Sinistres App — **sans accès** à la création de licences ni à la session Administrateur. La rubrique **menu « 🔑 Licence »** affiche son état (licence, expiration, jours restants) en lecture seule.
+6. Des **avertissements** s'affichent 30, 15, 7 et 1 jour(s) avant expiration ; à expiration, l'application se bloque et redemande un fichier de licence valide.
 
 ### Nouveautés : Relevé de Sinistralité Chauffeur / Flotte & Sauvegarde Miroir
 
@@ -46,7 +60,7 @@ Un pipeline complet, automatisé et reproductible est intégré pour générer l
 Double-cliquez sur **`build_release.bat`** (ou lancez `python build_release.py all` dans votre terminal).  
 Le pipeline exécute 4 étapes vérifiées :
 1. **`clean`** : Nettoyage des dossiers temporaires (`build/`, `dist/`, `release/`).
-2. **`compile`** : Vérification de la syntaxe et exécution de **l'intégralité des 68 tests unitaires** du projet (`run_tests.py`).
+2. **`compile`** : Vérification de la syntaxe et exécution de **l'intégralité des tests unitaires** du projet (`run_tests.py`).
 3. **`package`** : Création de l'application autonome via **PyInstaller** en mode `--onedir` (`dist/windows/Sinistres App/`) avec tous les hooks (`sqlite3`, `docx`, `win32com`, `tkinter`, `openpyxl`).
 4. **`installer`** : Compilation du script **Inno Setup** (`installer/Sinistres-App.iss`) pour produire le livrable final :
    ```
@@ -59,8 +73,10 @@ Le pipeline exécute 4 étapes vérifiées :
 
 | Fichier / Dossier | Rôle |
 |---|---|
-| `main.py` | L'application (interface graphique et logique principale) |
-| `database.py` | Base de données SQLite et gestion sécurisée des chemins `%APPDATA%` |
+| `main.py` | L'application Gestionnaire (interface graphique et logique principale) |
+| `admin_console.py` | **Console d'administration** (session Administrateur séparée : comptes + licences) |
+| `licensing.py` | Licences `.lic` signées Ed25519 (clé privée côté Admin, clé publique côté client), révocation |
+| `database.py` | Base de données SQLite (sinistres, utilisateurs, registre des licences) et gestion sécurisée des chemins `%APPDATA%` |
 | `fiche_sinistre_word.py` | Scanner intelligent et générateur de fiches Word (`.doc` & `.docx`) |
 | `pieces_jointes.py` | Gestionnaire de pièces jointes (dossier documentaire du sinistre) |
 | `importer.py` / `analytics.py` | Import Excel et analyses KPI / alertes |

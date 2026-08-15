@@ -11,6 +11,13 @@ backups/
 license.json
 license_master.json
 
+# Clés de signature des licences (SÉCURITÉ — la clé privée ne doit jamais être commitée)
+licensing_private_key.pem
+licensing_public_key.pem
+revocations.json
+Licences/
+*.lic
+
 # Fichiers temporaires
 tmp_*.py
 last_import_path.txt

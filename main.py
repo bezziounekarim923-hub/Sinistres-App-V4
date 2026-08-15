@@ -196,8 +196,8 @@ class App(tk.Tk):
     # ------------------------------------------------------------- authentification
     def _run_authentication(self):
         """Affiche la configuration d'accueil si aucun utilisateur n'existe (choix :
-        activation par fichier client .sini ou création compte éditeur), puis
-        affiche la fenêtre de connexion (§21)."""
+        activation Gestionnaire par fichier .lic ou création du compte éditeur),
+        puis affiche la fenêtre de connexion (§21)."""
         if db.user_count() == 0:
             InitialSetupDialog(self)
         while not self.current_user:
@@ -213,20 +213,42 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------- licence
     def _run_license_check(self):
+        # L'Administrateur (propriétaire) n'a pas besoin de licence client : sa
+        # session séparée est gérée par la Console d'administration.
+        if self.current_role == "Administrateur":
+            return
         status = licensing.check_license()
         if not status["valid"]:
-            dlg = LicenseRequiredDialog(self, status)
+            # Compte déjà existant → seule la licence (fichier .lic) est demandée.
+            self._activation_cancelled = False
+            dlg = ActivationDialog(self, require_account=False, fixed_username=self.current_user)
             self.wait_window(dlg)
+            if getattr(self, "_activation_cancelled", False):
+                self.destroy()
+                sys.exit(0)
             status = licensing.check_license()
             if not status["valid"]:
                 messagebox.showerror("Licence requise", "L'application ne peut pas démarrer sans licence valide.")
                 self.destroy()
                 sys.exit(0)
-        if status["days_left"] is not None and status["days_left"] <= 30:
-            messagebox.showwarning(
-                "Licence bientôt expirée",
-                f"Votre licence expire dans {status['days_left']} jour(s) (le {status['expiry']}).\n"
-                "Pensez à contacter l'éditeur pour la renouveler.")
+        self._warn_if_expiring(status)
+
+    def _warn_if_expiring(self, status):
+        """Avertissements avant expiration : 30, 15, 7 et 1 jour(s)."""
+        days = status.get("days_left")
+        if days is None:
+            return
+        if days <= 1:
+            messagebox.showwarning("Licence expirant", f"⚠️ Votre licence expire dans {days} jour(s) (le {status['expiry']}).\nContactez immédiatement l'administrateur pour la renouveler.")
+        elif days <= 7:
+            messagebox.showwarning("Licence bientôt expirée", f"Votre licence expire dans {days} jours (le {status['expiry']}).\nContactez l'administrateur pour obtenir une nouvelle licence.")
+        elif days <= 15:
+            messagebox.showwarning("Licence bientôt expirée", f"Votre licence expire dans {days} jours (le {status['expiry']}).\nPensez à contacter l'administrateur.")
+        elif days <= 30:
+            messagebox.showwarning("Licence bientôt expirée", f"Votre licence expire dans {days} jours (le {status['expiry']}).")
+
+    def _show_license_info(self):
+        LicenseInfoDialog(self)
 
     def _show_license_management(self):
         LicenseManagementDialog(self)
@@ -275,6 +297,12 @@ class App(tk.Tk):
     def _build_menu(self):
         menubar = tk.Menu(self)
         self.menubar = menubar
+
+        # Rubrique « Licence » visible par tous les rôles : état en lecture seule.
+        licence_menu = tk.Menu(menubar, tearoff=0)
+        licence_menu.add_command(label="ℹ️ Mon état de licence", command=self._show_license_info)
+        menubar.add_cascade(label="🔑 Licence", menu=licence_menu)
+
         admin_menu = tk.Menu(menubar, tearoff=0)
         admin_menu.add_command(label="🗑 Vider le fichier Excel...", command=self._admin_clear_excel)
         admin_menu.add_separator()
@@ -518,6 +546,8 @@ class App(tk.Tk):
         "last_import_path.txt",   # chemin du fichier Excel de ce poste
         "status_colors.json",
         "settings.json",
+        licensing.PRIVATE_KEY_FILE,  # clé PRIVÉE de signature : jamais côté Gestionnaire
+        licensing.REVOCATION_FILE,   # liste de révocation propre au poste Admin
     }
     CLIENT_COPY_EXCLUDE_DIRS = {
         "backups", "__pycache__", ".pytest_cache", ".git", "dist", "build", ".vscode", "testdata",
@@ -528,24 +558,15 @@ class App(tk.Tk):
             messagebox.showwarning("Accès refusé", "Seul un Administrateur peut préparer une copie de l'application.")
             return
 
-        has_master = licensing.master_password_is_set()
-        warning = ""
-        if not has_master:
-            warning = ("\n\n⚠️ ATTENTION : aucun mot de passe maître n'est défini sur ce poste. "
-                       "La copie n'inclura donc pas de fichier license_master.json, et la personne "
-                       "qui la recevra pourra définir SON PROPRE mot de passe maître et générer "
-                       "elle-même des licences illimitées, gratuitement !\n\n"
-                       "Définissez d'abord votre mot de passe maître (menu Administration → "
-                       "🔑 Licence) avant de préparer une copie à distribuer.")
-
         if not messagebox.askyesno(
                 "Préparer une copie pour un nouveau poste",
                 "Cette opération va créer une copie propre de l'application, prête à être "
-                "mise sur une clé USB et donnée à quelqu'un d'autre.\n\n"
-                "✅ Sera inclus : le programme, et votre mot de passe maître (protégé, "
-                "toujours haché) pour que vous restiez le seul à pouvoir générer des licences.\n"
-                "❌ Ne sera PAS inclus : votre licence active, votre base de données, "
-                "le chemin de votre fichier Excel." + warning + "\n\nContinuer ?"):
+                "mise sur une clé USB et donnée à un Gestionnaire.\n\n"
+                "✅ Sera inclus : le programme + la clé PUBLIQUE de vérification des licences.\n"
+                "❌ Ne sera PAS inclus : votre licence active, votre base de données, le chemin "
+                "de votre fichier Excel, et surtout votre clé PRIVÉE de signature (réservée à "
+                "l'Administrateur : un Gestionnaire ne pourra jamais fabriquer de licence).\n\n"
+                "Continuer ?"):
             return
 
         dest_parent = filedialog.askdirectory(title="Choisir où créer la copie (ex : clé USB)")
@@ -553,6 +574,9 @@ class App(tk.Tk):
             return
 
         import shutil as _shutil
+        # Génère (si besoin) la paire de clés : la clé publique partira avec la
+        # copie, la clé privée restera sur ce poste (exclue ci-dessus).
+        licensing.ensure_signing_keys()
         source_dir = db.get_app_dir()
         folder_name = f"SuiviSinistres_{datetime.date.today().isoformat()}"
         dest_dir = os.path.join(dest_parent, folder_name)
@@ -576,11 +600,13 @@ class App(tk.Tk):
                 copied.append(name)
 
             master_included = os.path.exists(os.path.join(dest_dir, "license_master.json"))
+            pub_included = os.path.exists(os.path.join(dest_dir, licensing.PUBLIC_KEY_FILE))
             summary = (f"Copie créée avec succès :\n{dest_dir}\n\n"
-                       f"{'✅' if master_included else '⚠️'} Mot de passe maître "
-                       f"{'inclus (protection active)' if master_included else 'NON inclus — protection absente !'}\n"
-                       "❌ Pas de licence active, pas de base de données : la personne devra "
-                       "importer son propre fichier Excel et vous demander un code de licence.\n\n"
+                       f"{'✅' if pub_included else '⚠️'} Clé publique de vérification "
+                       f"{'incluse' if pub_included else 'NON incluse !'}\n"
+                       "🔐 Clé privée de signature : NON incluse (réservée à l'Administrateur).\n"
+                       "❌ Pas de licence active, pas de base de données : le Gestionnaire devra "
+                       "importer son propre fichier Excel et activer votre licence (.lic).\n\n"
                        "Vous pouvez maintenant copier ce dossier sur la clé USB.")
             db.log_action(self.current_user, "PREPARATION_COPIE_CLIENT", dossier_label=folder_name)
             messagebox.showinfo("Copie prête", summary)
@@ -2990,7 +3016,7 @@ class InitialSetupDialog(tk.Toplevel):
     Permet deux modes de démarrage :
     1. Mode Gestionnaire (Utilisateur final) : Le gestionnaire crée SON PROPRE
        compte (nom + mot de passe) puis active sa licence de 1 an avec le fichier
-       (.sini) remis par l'Éditeur. L'accès Administrateur reste réservé à l'éditeur.
+       (.lic) remis par l'Administrateur. L'accès Administrateur reste réservé.
     2. Mode Éditeur (Administrateur principal) : Permet à l'Éditeur d'installer le
        premier compte Administrateur principal sur son propre poste.
     """
@@ -3008,16 +3034,16 @@ class InitialSetupDialog(tk.Toplevel):
         tk.Label(self, text="Pour commencer, veuillez choisir votre mode d'activation :",
                  justify="center", fg="#555").pack(pady=(0, 12))
 
-        # ---- Option 1 : Gestionnaire (compte + fichier de licence .sini) ----
+        # ---- Option 1 : Gestionnaire (compte + fichier de licence .lic) ----
         card_client = tk.LabelFrame(self, text=" 🔑 Activation Gestionnaire (Client / Collègue) ",
                                     font=("Segoe UI", 10, "bold"), fg=COLOR_PRIMARY, padx=14, pady=12)
         card_client.pack(fill="x", padx=24, pady=8)
         tk.Label(card_client,
                  text="Vous êtes Gestionnaire ? Créez votre propre compte, puis\n"
-                      "activez votre licence de 1 an avec le fichier (.sini) remis\n"
-                      "par votre éditeur.",
+                      "activez votre licence avec le fichier (.lic) remis par\n"
+                      "votre administrateur.",
                  justify="left", fg="#444", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 10))
-        ttk.Button(card_client, text="📂 Créer mon compte et activer ma licence (.sini)",
+        ttk.Button(card_client, text="📂 Créer mon compte et activer ma licence (.lic)",
                    command=self._activate_client).pack(anchor="w")
 
         # ---- Option 2 : Éditeur / Administrateur principal ----
@@ -3038,11 +3064,11 @@ class InitialSetupDialog(tk.Toplevel):
         sys.exit(0)
 
     def _activate_client(self):
-        # Parcours Gestionnaire : masque cet écran initial et ouvre la fenêtre de
-        # création de compte + activation de la licence. En cas de « Retour », cet
-        # écran est réaffiché (voir ManagerSetupDialog).
+        # Parcours Gestionnaire : masque cet écran initial et ouvre la fenêtre
+        # d'activation (création de compte + fichier de licence .lic). En cas de
+        # « Retour », cet écran est réaffiché (voir ActivationDialog).
         self.withdraw()
-        ManagerSetupDialog(self.app, initial=self)
+        ActivationDialog(self.app, require_account=True, initial=self)
 
     def _setup_admin(self):
         self.destroy()
@@ -3050,48 +3076,52 @@ class InitialSetupDialog(tk.Toplevel):
 
 
 class ClientAccessExportDialog(tk.Toplevel):
-    """Fenêtre d'exportation d'une LICENCE (.sini) par l'Éditeur pour un
-    gestionnaire/client. Génère un fichier de licence signé (1 an par défaut),
-    SANS identifiants : le gestionnaire créera lui-même son compte au premier
-    lancement puis activera sa licence avec ce fichier."""
+    """Générateur de LICENCE (.lic) accessible depuis l'application principale
+    (menu Administration). La Console d'administration (admin_console.py) est
+    l'interface dédiée et plus complète ; cette fenêtre reste disponible pour
+    l'Administrateur connecté dans main.py."""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.app = parent
-        self.title("🎟️ Exporter une licence (.sini — 1 an)")
-        self.geometry("520x360")
+        self.title("🎟️ Exporter une licence (.lic — 1 an)")
+        self.geometry("520x320")
         self.grab_set()
         self.resizable(False, False)
 
         header = tk.Frame(self, bg=COLOR_PRIMARY)
         header.pack(fill="x")
-        tk.Label(header, text="🎟️ GÉNÉRATEUR DE LICENCE (.SINI)",
+        tk.Label(header, text="🎟️ GÉNÉRATEUR DE LICENCE (.LIC)",
                  bg=COLOR_PRIMARY, fg="white", font=("Segoe UI", 12, "bold")).pack(pady=(12, 2))
-        tk.Label(header, text="Générez une licence officielle à remettre à un gestionnaire.",
+        tk.Label(header, text="Générez une licence signée à remettre à un Gestionnaire.",
                  bg=COLOR_PRIMARY, fg="#cfe0ff", font=("Segoe UI", 9)).pack(pady=(0, 10))
 
         form = tk.Frame(self, bg=COLOR_BG)
         form.pack(fill="both", expand=True, padx=24, pady=14)
 
-        tk.Label(form, text="Nom du gestionnaire (libellé) :", bg=COLOR_BG, font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=6)
-        self.entry_label = ttk.Entry(form, width=28)
-        self.entry_label.grid(row=0, column=1, pady=6)
-        tk.Label(form, text="(inscrit sur la licence ; le gestionnaire créera lui-même son compte)",
-                 bg=COLOR_BG, fg="#666", font=("Segoe UI", 8)).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        users = [u for u in db.fetch_users() if u["role"] in ("Gestionnaire", "Consultation")]
+        tk.Label(form, text="Compte Gestionnaire :", bg=COLOR_BG, font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=6)
+        self.cb_user = ttk.Combobox(form, values=[u["username"] for u in users], state="readonly", width=26)
+        self.cb_user.grid(row=0, column=1, pady=6)
+        if users:
+            self.cb_user.set(users[0]["username"])
 
-        tk.Label(form, text="Durée de la licence (jours) :", bg=COLOR_BG, font=("Segoe UI", 9, "bold")).grid(row=2, column=0, sticky="w", pady=6)
+        tk.Label(form, text="Durée de la licence (jours) :", bg=COLOR_BG, font=("Segoe UI", 9, "bold")).grid(row=1, column=0, sticky="w", pady=6)
         self.entry_days = ttk.Entry(form, width=12)
         self.entry_days.insert(0, "365")
-        self.entry_days.grid(row=2, column=1, sticky="w", pady=6)
+        self.entry_days.grid(row=1, column=1, sticky="w", pady=6)
 
         btn_bar = tk.Frame(self, bg=COLOR_BG)
         btn_bar.pack(fill="x", padx=24, pady=(16, 16))
-        ttk.Button(btn_bar, text="📦 Générer le fichier (.sini)", command=self._generate).pack(side="left", padx=4)
+        ttk.Button(btn_bar, text="📦 Générer le fichier (.lic)", command=self._generate).pack(side="left", padx=4)
         ttk.Button(btn_bar, text="Annuler", command=self.destroy).pack(side="right", padx=4)
 
     def _generate(self):
-        label = self.entry_label.get().strip()
+        licensee = self.cb_user.get().strip()
         days_str = self.entry_days.get().strip()
+        if not licensee:
+            messagebox.showwarning("Aucun compte", "Créez d'abord un compte Gestionnaire (Gestion des utilisateurs).", parent=self)
+            return
         try:
             days = int(days_str)
             if days <= 0:
@@ -3100,35 +3130,34 @@ class ClientAccessExportDialog(tk.Toplevel):
             messagebox.showwarning("Durée invalide", "Veuillez entrer une durée valide en jours (ex: 365).", parent=self)
             return
 
-        import client_access as ca
         default_dir = os.path.join(db.get_app_dir(), "Licences")
         os.makedirs(default_dir, exist_ok=True)
-        safe_label = re.sub(r"[^0-9A-Za-z_-]+", "_", label) or "gestionnaire"
-        filename = f"Licence_{safe_label}_{days}j.sini"
+        filename = f"licence_{licensee}_{days}j.lic"
 
         path = filedialog.asksaveasfilename(
             parent=self,
-            title="Enregistrer le fichier de licence (.sini)",
-            defaultextension=".sini",
+            title="Enregistrer le fichier de licence (.lic)",
+            defaultextension=".lic",
             initialdir=default_dir,
             initialfile=filename,
-            filetypes=[("Fichier de licence Sinistres App", "*.sini"), ("Tous les fichiers", "*.*")]
+            filetypes=[("Licence Sinistres App", "*.lic"), ("Tous les fichiers", "*.*")]
         )
         if not path:
             return
 
         try:
-            ca.export_license_file(path, label=label, duration_days=days)
-            db.log_action(self.app.current_user, "EXPORT_LICENCE_CLIENT",
-                          dossier_label=label or "(sans libellé)",
-                          nouvelle_valeur={"duree_jours": days, "fichier": path})
+            licensing.ensure_signing_keys()
+            doc = licensing.generate_license_file(path, licensee=licensee, duration_days=days)
+            db.insert_license(doc)
+            db.log_action(self.app.current_user, "GENERATION_LICENCE",
+                          dossier_label=licensee,
+                          nouvelle_valeur={"license_id": doc["license_id"],
+                                           "expiry": doc["expiry_date"], "duree_jours": days})
             messagebox.showinfo(
                 "Licence créée avec succès ! 🎉",
-                f"Le fichier de licence a été enregistré dans :\n{path}\n\n"
-                f"Transmettez ce fichier '.sini' à votre gestionnaire en même temps que "
-                f"Sinistres-App-Setup.exe.\n\n"
-                f"Au premier lancement, le gestionnaire créera SON PROPRE compte "
-                f"(nom + mot de passe) puis activera sa licence de {days} jours avec ce fichier.",
+                f"Licence : {doc['license_id']} (compte : {licensee}, expire le {doc['expiry_date']}).\n\n"
+                f"Fichier : {path}\n\n"
+                "Transmettez ce fichier .lic au Gestionnaire avec Sinistres-App-Setup.exe.",
                 parent=self
             )
             self.destroy()
@@ -3190,59 +3219,79 @@ class FirstAdminSetupDialog(tk.Toplevel):
         self.destroy()
 
 
-class ManagerSetupDialog(tk.Toplevel):
-    """Installation côté Gestionnaire au premier lancement :
-    1. Le gestionnaire crée SON PROPRE compte (nom d'utilisateur + mot de passe) ;
-    2. Il sélectionne le fichier de licence (.sini) remis par l'éditeur ;
-    3. La licence active l'application pour la durée prévue (ex : 1 an).
+class ActivationDialog(tk.Toplevel):
+    """Écran d'activation de Sinistres App (côté Gestionnaire).
 
-    Les anciens fichiers .sini « complets » (avec compte pré-enregistré) restent
-    acceptés : dans ce cas, le compte est installé depuis le fichier."""
+    Deux modes :
+    - require_account=True (premier lancement) : le Gestionnaire saisit SON nom
+      d'utilisateur + SON mot de passe, choisit son fichier de licence .lic, puis
+      clique « Activer l'application ». Le compte est créé localement et la
+      licence activée.
+    - require_account=False (licence expirée/invalide) : le compte existe déjà,
+      seul le fichier de licence est demandé (vérification : la licence doit
+      correspondre au compte connecté).
 
-    def __init__(self, parent, initial=None):
+    Les anciens fichiers .sini « complets » (compte pré-enregistré) restent
+    acceptés en compatibilité ascendante."""
+
+    def __init__(self, parent, require_account=True, fixed_username=None, initial=None):
         super().__init__(parent)
         self.app = parent
         self.initial = initial
-        self.title("Activation Gestionnaire — compte + licence")
-        self.geometry("540x440")
+        self.require_account = require_account
+        self.fixed_username = fixed_username or ""
+        self.title("Activation de Sinistres App")
+        self.geometry("560x420")
         self.protocol("WM_DELETE_WINDOW", self._quit_app)
         self.grab_set()
         self.resizable(False, False)
         self.license_path = None
 
-        tk.Label(self, text="👤 Compte Gestionnaire", font=("Segoe UI", 13, "bold")).pack(pady=(16, 2))
-        tk.Label(self, text="Créez votre propre compte, puis activez votre licence avec\n"
-                            "le fichier (.sini) remis par votre éditeur.",
+        tk.Label(self, text="🔑 Activation de Sinistres App", font=("Segoe UI", 14, "bold")).pack(pady=(16, 2))
+        tk.Label(self, text="Activez votre application avec le fichier de licence (.lic)\nremis par votre administrateur.",
                  justify="center", fg="#555").pack(pady=(0, 12))
 
         form = tk.Frame(self)
-        form.pack(fill="x", padx=24)
-        tk.Label(form, text="Nom d'utilisateur :").grid(row=0, column=0, sticky="w", pady=6)
-        self.entry_user = ttk.Entry(form, width=26)
-        self.entry_user.grid(row=0, column=1, pady=6)
-        tk.Label(form, text="Mot de passe :").grid(row=1, column=0, sticky="w", pady=6)
-        self.entry_pass = ttk.Entry(form, width=26, show="•")
-        self.entry_pass.grid(row=1, column=1, pady=6)
-        tk.Label(form, text="Confirmer :").grid(row=2, column=0, sticky="w", pady=6)
-        self.entry_pass2 = ttk.Entry(form, width=26, show="•")
-        self.entry_pass2.grid(row=2, column=1, pady=6)
+        form.pack(fill="x", padx=28)
 
-        tk.Label(self, text="Fichier de licence (.sini) :", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=24, pady=(14, 4))
+        if self.require_account:
+            tk.Label(form, text="Nom d'utilisateur :").grid(row=0, column=0, sticky="w", pady=6)
+            self.entry_user = ttk.Entry(form, width=28)
+            self.entry_user.grid(row=0, column=1, pady=6)
+            tk.Label(form, text="Mot de passe :").grid(row=1, column=0, sticky="w", pady=6)
+            self.entry_pass = ttk.Entry(form, width=28, show="•")
+            self.entry_pass.grid(row=1, column=1, pady=6)
+            tk.Label(form, text="Confirmer :").grid(row=2, column=0, sticky="w", pady=6)
+            self.entry_pass2 = ttk.Entry(form, width=28, show="•")
+            self.entry_pass2.grid(row=2, column=1, pady=6)
+        else:
+            tk.Label(form, text="Compte :", width=14, anchor="w").grid(row=0, column=0, sticky="w", pady=6)
+            tk.Label(form, text=self.fixed_username, font=("Segoe UI", 10, "bold"), anchor="w").grid(row=0, column=1, sticky="w", pady=6)
+            self.entry_user = None
+            self.entry_pass = None
+            self.entry_pass2 = None
+
+        tk.Label(self, text="Fichier de licence (.lic) :", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=28, pady=(12, 4))
         lic_btn_row = tk.Frame(self)
-        lic_btn_row.pack(fill="x", padx=24, pady=(0, 4))
-        ttk.Button(lic_btn_row, text="📂 Choisir le fichier...", command=self._choose_license).pack(side="left")
+        lic_btn_row.pack(fill="x", padx=28, pady=(0, 4))
+        ttk.Button(lic_btn_row, text="📂 Sélectionner le fichier de licence", command=self._choose_license).pack(side="left")
         self.lbl_license = tk.Label(lic_btn_row, text="(aucun fichier sélectionné)", fg="#777", anchor="w")
         self.lbl_license.pack(side="left", padx=10, fill="x", expand=True)
 
         btn_row = tk.Frame(self)
-        btn_row.pack(fill="x", padx=24, pady=(16, 0))
-        ttk.Button(btn_row, text="✅ Activer mon compte", command=self._activate).pack(side="left", padx=4)
-        ttk.Button(btn_row, text="Retour", command=self._back).pack(side="left", padx=4)
-        self.entry_user.focus_set()
+        btn_row.pack(fill="x", padx=28, pady=(18, 0))
+        ttk.Button(btn_row, text="✅ Activer l'application", command=self._activate).pack(side="left", padx=4)
+        if self.initial:
+            ttk.Button(btn_row, text="Retour", command=self._back).pack(side="left", padx=4)
+        else:
+            ttk.Button(btn_row, text="Quitter", command=self._quit_app).pack(side="left", padx=4)
 
     def _quit_app(self):
-        self.app.destroy()
-        sys.exit(0)
+        if self.initial:
+            self._back()
+        else:
+            self.app._activation_cancelled = True
+            self.destroy()
 
     def _back(self):
         self.destroy()
@@ -3256,74 +3305,96 @@ class ManagerSetupDialog(tk.Toplevel):
     def _choose_license(self):
         path = filedialog.askopenfilename(
             parent=self,
-            title="Sélectionner le fichier de licence (.sini)",
-            filetypes=[("Fichier de licence Sinistres App", "*.sini;*.json"),
+            title="Sélectionner le fichier de licence (.lic)",
+            filetypes=[("Licence Sinistres App (*.lic)", "*.lic"),
+                       ("Ancien accès (*.sini, *.json)", "*.sini;*.json"),
                        ("Tous les fichiers", "*.*")]
         )
         if path:
             self.license_path = path
             self.lbl_license.config(text=os.path.basename(path), fg="#1e8e5a")
 
+    def _username(self):
+        if self.require_account:
+            return self.entry_user.get().strip()
+        return self.fixed_username
+
     def _activate(self):
-        username = self.entry_user.get().strip()
-        password = self.entry_pass.get()
-        password2 = self.entry_pass2.get()
-
         if not self.license_path:
-            messagebox.showwarning("Licence manquante", "Veuillez sélectionner le fichier de licence (.sini).")
+            messagebox.showwarning("Licence manquante", "Veuillez sélectionner le fichier de licence (.lic).")
             return
 
-        import client_access as ca
-        try:
-            kind = ca.detect_client_file_kind(self.license_path)
-        except Exception as e:
-            messagebox.showerror("Fichier illisible", f"Impossible de lire le fichier :\n{e}")
-            return
-
-        # Ancien format complet : le compte est fourni dans le fichier.
-        if kind == "full":
+        # Compatibilité ascendante : ancien fichier .sini « complet ».
+        if self._is_full_sini(self.license_path):
+            import client_access as ca
             try:
                 ok, user, expiry = ca.import_client_access_file(self.license_path)
                 messagebox.showinfo("Activation réussie 🎉",
                                     f"Votre compte « {user} » a été installé depuis le fichier.\n"
-                                    f"Licence active jusqu'au {expiry}.\n\n"
-                                    "Vous pouvez maintenant vous connecter.",
+                                    f"Licence active jusqu'au {expiry}.\n\nVous pouvez vous connecter.",
                                     parent=self)
                 self._finish()
             except Exception as e:
                 messagebox.showerror("Erreur d'activation", f"Impossible d'activer :\n{e}", parent=self)
             return
 
-        # Nouveau format licence seule : le gestionnaire crée son propre compte.
-        if not username or not password:
-            messagebox.showwarning("Champs requis", "Le nom d'utilisateur et le mot de passe sont requis.")
-            return
-        if len(password) < 4:
-            messagebox.showwarning("Mot de passe trop court", "Le mot de passe doit contenir au moins 4 caractères.")
-            return
-        if password != password2:
-            messagebox.showwarning("Erreur", "Les deux mots de passe ne correspondent pas.")
-            return
-        if any(u["username"].lower() == username.lower() for u in db.fetch_users()):
-            messagebox.showerror("Erreur", f"Le nom d'utilisateur « {username} » existe déjà. Choisissez-en un autre.")
+        username = self._username()
+        if self.require_account:
+            password = self.entry_pass.get()
+            password2 = self.entry_pass2.get()
+            if not username or not password:
+                messagebox.showwarning("Champs requis", "Le nom d'utilisateur et le mot de passe sont requis.")
+                return
+            if len(password) < 4:
+                messagebox.showwarning("Mot de passe trop court", "Le mot de passe doit contenir au moins 4 caractères.")
+                return
+            if password != password2:
+                messagebox.showwarning("Erreur", "Les deux mots de passe ne correspondent pas.")
+                return
+            if any(u["username"].lower() == username.lower() for u in db.fetch_users()):
+                messagebox.showerror("Erreur", f"Le nom d'utilisateur « {username} » existe déjà. Choisissez-en un autre.")
+                return
+
+        result = licensing.activate_license_file(self.license_path, username)
+        if not result["ok"]:
+            messagebox.showerror("Activation refusée", self._license_message(result))
             return
 
-        try:
-            ok, expiry, label = ca.import_license_file(self.license_path)
-            if not ok:
-                raise ValueError("Licence invalide.")
+        doc = result["data"]
+        if self.require_account:
             db.create_user(username, password, "Gestionnaire")
             db.log_action(username, "CREATION_COMPTE_GESTIONNAIRE", dossier_label=username,
-                           nouvelle_valeur={"username": username, "role": "Gestionnaire",
-                                            "licence_expiration": expiry})
-            messagebox.showinfo("Activation réussie 🎉",
-                                f"Votre compte « {username} » (rôle : Gestionnaire) a été créé.\n"
-                                f"Licence active jusqu'au {expiry}.\n\n"
-                                "Vous pouvez maintenant vous connecter.",
-                                parent=self)
-            self._finish()
-        except Exception as e:
-            messagebox.showerror("Erreur d'activation", f"Impossible d'activer :\n{e}", parent=self)
+                          nouvelle_valeur={"username": username, "role": "Gestionnaire",
+                                           "license_id": doc.get("license_id"),
+                                           "licence_expiration": doc.get("expiry_date")})
+            self.app.current_user = username
+            self.app.current_role = "Gestionnaire"
+
+        messagebox.showinfo("Activation réussie 🎉",
+                            f"Votre licence est active jusqu'au {doc.get('expiry_date')}.\n"
+                            f"Licence : {doc.get('license_id')}\n\n"
+                            "Vous pouvez maintenant utiliser l'application.",
+                            parent=self)
+        self._finish()
+
+    def _license_message(self, result):
+        reason = result.get("reason")
+        if reason == "expired" and result.get("data"):
+            expiry = result["data"].get("expiry_date") or "?"
+            return f"Votre licence a expiré le {expiry}.\nVeuillez contacter l'administrateur pour obtenir une nouvelle licence."
+        if reason == "wrong_account":
+            return "Cette licence ne correspond pas à ce compte Gestionnaire."
+        return licensing.LICENSE_REASONS_FR.get(reason, "La licence est invalide.")
+
+    @staticmethod
+    def _is_full_sini(path):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            payload = data.get("payload") or {}
+            return bool(payload.get("client_user") or payload.get("admin_user"))
+        except Exception:
+            return False
 
     def _finish(self):
         self.destroy()
@@ -3695,6 +3766,70 @@ class LicenseStatusDialog(tk.Toplevel):
         LicenseGeneratorDialog(self.app)
 
 
+class LicenseInfoDialog(tk.Toplevel):
+    """Rubrique « Licence » : état en LECTURE SEULE pour le Gestionnaire
+    (utilisateur, numéro de licence, activation, expiration, jours restants).
+    Aucune modification n'est possible ici."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.app = parent
+        self.title("🔑 Ma licence")
+        self.geometry("440x300")
+        self.resizable(False, False)
+
+        status = licensing.check_license()
+        tk.Label(self, text="🔑 État de la licence", font=("Segoe UI", 13, "bold")).pack(pady=(16, 12))
+
+        info = tk.Frame(self)
+        info.pack(fill="x", padx=24)
+
+        if status["valid"]:
+            statut_txt = "✅ Valide"
+            statut_fg = COLOR_OK
+        elif status["reason"] == "expired":
+            statut_txt = "❌ Expirée"
+            statut_fg = COLOR_WARN
+        elif status["reason"] == "revoked":
+            statut_txt = "⛔ Révoquée"
+            statut_fg = COLOR_WARN
+        else:
+            statut_txt = "⚠ Invalide"
+            statut_fg = COLOR_WARN
+
+        days = status.get("days_left")
+        rows = [
+            ("Utilisateur", self.app.current_user or (status.get("label") or "—")),
+            ("Licence", status.get("license_id") or "—"),
+            ("Activée le", self._from_license_dates(status) or "—"),
+            ("Expire le", status.get("expiry") or "—"),
+            ("Jours restants", str(days) if days is not None else "—"),
+            ("Statut", statut_txt),
+        ]
+        for i, (label, value) in enumerate(rows):
+            tk.Label(info, text=label, anchor="w").grid(row=i, column=0, sticky="w", pady=5)
+            lbl = tk.Label(info, text=str(value), anchor="e", font=("Segoe UI", 9, "bold"))
+            if label == "Statut":
+                lbl.config(fg=statut_fg)
+            lbl.grid(row=i, column=1, sticky="e", pady=5)
+        info.columnconfigure(1, weight=1)
+
+        tk.Label(self, text="Pour renouveler votre licence, contactez votre administrateur.",
+                 fg="#888", font=("Segoe UI", 8), wraplength=380, justify="center").pack(side="bottom", pady=12)
+        ttk.Button(self, text="Fermer", command=self.destroy).pack(pady=10)
+
+    @staticmethod
+    def _from_license_dates(status):
+        # La date de début n'est pas toujours disponible dans l'état de la
+        # licence ; on la lit directement depuis license.json si présente.
+        try:
+            with open(licensing.get_license_path(), "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data.get("start_date") or data.get("created_at")
+        except Exception:
+            return None
+
+
 class AdminDashboardDialog(tk.Toplevel):
     """Tableau de bord d'administration (§24)."""
 
@@ -3809,7 +3944,7 @@ class UserManagementDialog(tk.Toplevel):
         ttk.Button(top, text="🔑 Changer le rôle", command=self._change_role).pack(side="left", padx=4)
         ttk.Button(top, text="🔒 Réinitialiser le mot de passe", command=self._reset_password).pack(side="left", padx=4)
         ttk.Button(top, text="🗑 Supprimer", command=self._delete_user).pack(side="left", padx=4)
-        ttk.Button(top, text="🎟️ Exporter licence (.sini)", command=self._export_client_access).pack(side="right", padx=4)
+        ttk.Button(top, text="🎟️ Exporter licence (.lic)", command=self._export_client_access).pack(side="right", padx=4)
 
         cols = ["id", "username", "role", "created_at"]
         headers = ["ID", "Utilisateur", "Rôle", "Créé le"]
@@ -3919,7 +4054,7 @@ class UserManagementDialog(tk.Toplevel):
         self._refresh()
 
     def _export_client_access(self):
-        """Ouvre le générateur de licence (.sini) à transmettre à un gestionnaire."""
+        """Ouvre le générateur de licence (.lic) à transmettre à un gestionnaire."""
         ClientAccessExportDialog(self.app)
 
 

@@ -24,6 +24,9 @@ import secrets
 import base64
 import datetime
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
+
 import database as db
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,22 @@ APP_SECRET = "SUIVI-SINISTRES-LICENSE-SIGNING-KEY-2026"
 LICENSE_FILE = "license.json"
 MASTER_FILE = "license_master.json"
 DEFAULT_DURATION_DAYS = 365
+
+# ------------------------------------------------------------------ licences .lic
+# Clés de signature asymétriques (Ed25519) :
+#   - la clé PRIVÉE signe les licences et reste UNIQUEMENT sur le poste Admin ;
+#   - la clé PUBLIQUE vérifie les licences et est distribuée avec l'application.
+PRIVATE_KEY_FILE = "licensing_private_key.pem"
+PUBLIC_KEY_FILE = "licensing_public_key.pem"
+REVOCATION_FILE = "revocations.json"
+LICENSE_KIND = "sinistres_app_license"
+LICENSE_FILE_EXT = ".lic"
+
+# Clé publique à intégrer au BUILD pour durcir la vérification côté Gestionnaire
+# (si elle est définie, elle est prioritaire sur le fichier de clé publique
+# inscriptible). L'éditeur peut y coller le PEM de sa clé publique avant de
+# compiler Sinistres-App-Setup.exe. Laisser None pour utiliser le fichier local.
+EMBEDDED_PUBLIC_KEY = None
 
 # Paramètres du hachage du mot de passe maître (S1) : PBKDF2-HMAC-SHA256, comme
 # pour les comptes utilisateurs. Compatibilité ascendante avec l'ancien format
@@ -221,22 +240,306 @@ def get_current_token():
         return None
 
 
+# ------------------------------------------------------------------ clés Ed25519
+def _private_key_path():
+    return os.path.join(db.get_app_dir(), PRIVATE_KEY_FILE)
+
+
+def _public_key_path():
+    return os.path.join(db.get_app_dir(), PUBLIC_KEY_FILE)
+
+
+def get_revocation_path():
+    return os.path.join(db.get_app_dir(), REVOCATION_FILE)
+
+
+def ensure_signing_keys():
+    """Génère (une seule fois) la paire de clés Ed25519 de l'éditeur.
+
+    - Clé PRIVÉE : signe les licences — reste uniquement sur le poste Admin
+      (jamais incluse dans une copie destinée à un Gestionnaire).
+    - Clé PUBLIQUE : vérifie les licences — distribuée avec l'application.
+
+    Retourne (chemin_privé, chemin_public).
+    """
+    priv_path = _private_key_path()
+    pub_path = _public_key_path()
+    if os.path.exists(priv_path) and os.path.exists(pub_path):
+        return priv_path, pub_path
+    key = Ed25519PrivateKey.generate()
+    priv_bytes = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption())
+    pub_bytes = key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo)
+    with open(priv_path, "wb") as fh:
+        fh.write(priv_bytes)
+    with open(pub_path, "wb") as fh:
+        fh.write(pub_bytes)
+    return priv_path, pub_path
+
+
+def _load_private_key():
+    path = _private_key_path()
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return serialization.load_pem_private_key(fh.read(), password=None)
+    except Exception:
+        logger.warning("Impossible de lire la clé privée de licence: %s", path, exc_info=True)
+        return None
+
+
+def _load_public_key():
+    # 1) Clé publique intégrée au build (prioritaire, non modifiable facilement).
+    if EMBEDDED_PUBLIC_KEY:
+        try:
+            return serialization.load_pem_public_key(EMBEDDED_PUBLIC_KEY.encode("utf-8"))
+        except Exception:
+            pass
+    # 2) Fichier de clé publique distribué avec l'application.
+    path = _public_key_path()
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return serialization.load_pem_public_key(fh.read())
+    except Exception:
+        logger.warning("Impossible de lire la clé publique de licence: %s", path, exc_info=True)
+        return None
+
+
+def has_private_key():
+    """True uniquement sur le poste Administrateur (clé privée de signature présente)."""
+    return _load_private_key() is not None
+
+
+def get_public_key_pem():
+    """Retourne le PEM de la clé publique (pour l'intégrer au build par l'éditeur)."""
+    key = _load_public_key()
+    if key is None:
+        return None
+    return key.public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo).decode("utf-8")
+
+
+def generate_license_id():
+    """Identifiant unique de licence : LIC-XXXXXXXX (8 caractères hexadécimaux)."""
+    return "LIC-" + secrets.token_hex(4).upper()
+
+
+def _canonical_payload(payload):
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def build_license_payload(license_id, licensee, duration_days=365, start_date=None):
+    """Construit le contenu (non signé) d'une licence .lic."""
+    start = start_date or datetime.date.today()
+    expiry = start + datetime.timedelta(days=int(duration_days))
+    return {
+        "format_version": "3.0",
+        "kind": LICENSE_KIND,
+        "license_id": license_id,
+        "licensee": licensee,
+        "created_at": datetime.date.today().isoformat(),
+        "start_date": start.isoformat(),
+        "expiry_date": expiry.isoformat(),
+        "duration_days": int(duration_days),
+    }
+
+
+def sign_license_payload(payload):
+    """Signe un payload avec la clé privée de l'éditeur (Ed25519)."""
+    key = _load_private_key()
+    if key is None:
+        raise RuntimeError("Clé privée de licence absente : la signature est réservée à l'Administrateur.")
+    return base64.b64encode(key.sign(_canonical_payload(payload).encode("utf-8"))).decode("ascii")
+
+
+def verify_license_signature(payload, signature):
+    """Vérifie la signature Ed25519 d'un payload avec la clé publique."""
+    key = _load_public_key()
+    if key is None:
+        return False
+    try:
+        key.verify(base64.b64decode(signature), _canonical_payload(payload).encode("utf-8"))
+        return True
+    except Exception:
+        return False
+
+
+def generate_license_file(output_path, licensee, duration_days=365, start_date=None, license_id=None):
+    """Crée un fichier de licence .lic signé, lié au compte Gestionnaire `licensee`.
+
+    Retourne le document complet (payload + signature), à enregistrer dans le
+    registre des licences de l'Administrateur.
+    """
+    license_id = license_id or generate_license_id()
+    payload = build_license_payload(license_id, licensee, duration_days, start_date)
+    signature = sign_license_payload(payload)
+    doc = dict(payload)
+    doc["signature"] = signature
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2, ensure_ascii=False)
+    return doc
+
+
+# ---------------------------------------------------------------- révocation
+def build_revocation_list(revoked_ids):
+    """Écrit (signée) la liste des licences révoquées, à distribuer aux postes
+    Gestionnaire pour que la révocation soit prise en compte localement."""
+    payload = {"kind": "sinistres_app_revocations", "revoked": sorted(set(revoked_ids))}
+    signature = sign_license_payload(payload)
+    with open(get_revocation_path(), "w", encoding="utf-8") as fh:
+        json.dump({"payload": payload, "signature": signature}, fh, indent=2, ensure_ascii=False)
+    return get_revocation_path()
+
+
+def load_revocation_list():
+    """Retourne l'ensemble des identifiants de licence révoqués (vérifié par signature)."""
+    path = get_revocation_path()
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        payload = doc.get("payload")
+        sig = doc.get("signature")
+        if not payload or not sig or not verify_license_signature(payload, sig):
+            return set()
+        return set(payload.get("revoked") or [])
+    except Exception:
+        return set()
+
+
+# ---------------------------------------------------------------- vérification .lic
+LICENSE_REASONS_FR = {
+    "missing": "Le fichier de licence est introuvable.",
+    "not_license": "Ce fichier n'est pas une licence Sinistres App valide.",
+    "tampered": "La licence est invalide ou a été modifiée.",
+    "expired": "Votre licence a expiré. Veuillez contacter l'administrateur pour obtenir une nouvelle licence.",
+    "revoked": "Cette licence a été révoquée par l'administrateur.",
+    "not_started": "La période de validité de cette licence n'a pas encore commencé.",
+}
+
+
+def load_license_file(path):
+    """Vérifie intégralement un fichier .lic et retourne {ok, reason, data}.
+
+    Vérifie : existence, format, signature, révocation, période de validité.
+    """
+    if not os.path.exists(path):
+        return {"ok": False, "reason": "missing", "data": None}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except Exception:
+        return {"ok": False, "reason": "not_license", "data": None}
+
+    signature = doc.get("signature")
+    payload = {k: v for k, v in doc.items() if k != "signature"}
+    if not signature or payload.get("kind") != LICENSE_KIND or "license_id" not in payload:
+        return {"ok": False, "reason": "not_license", "data": None}
+    if not verify_license_signature(payload, signature):
+        return {"ok": False, "reason": "tampered", "data": None}
+
+    today = datetime.date.today()
+    try:
+        start = datetime.date.fromisoformat(payload["start_date"])
+        expiry = datetime.date.fromisoformat(payload["expiry_date"])
+    except (KeyError, TypeError, ValueError):
+        return {"ok": False, "reason": "tampered", "data": None}
+
+    if payload["license_id"] in load_revocation_list():
+        return {"ok": False, "reason": "revoked", "data": None}
+    if today < start:
+        return {"ok": False, "reason": "not_started", "data": None}
+    if today > expiry:
+        return {"ok": False, "reason": "expired", "data": doc}
+    return {"ok": True, "reason": "ok", "data": doc}
+
+
+def activate_license_file(path, username):
+    """Active un fichier .lic pour le compte `username` (côté Gestionnaire).
+
+    Vérifie que la licence correspond bien au compte, puis l'enregistre comme
+    licence active. Retourne {ok, reason, data}.
+    """
+    result = load_license_file(path)
+    if not result["ok"]:
+        return result
+    doc = result["data"]
+    if not username or username.strip().lower() != (doc.get("licensee") or "").strip().lower():
+        return {"ok": False, "reason": "wrong_account", "data": doc}
+    apply_license_document(doc)
+    return {"ok": True, "reason": "ok", "data": doc}
+
+
+def apply_license_document(doc):
+    """Enregistre un document .lic validé comme licence active (license.json)."""
+    with open(get_license_path(), "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2, ensure_ascii=False)
+    return True
+
+
 def check_license():
-    """Retourne un état détaillé de la licence active : valid, reason, expiry, days_left."""
+    """Retourne un état détaillé de la licence active : valid, reason, expiry,
+    days_left, label (compte lié), license_id."""
+    base = {"valid": False, "reason": "missing", "expiry": None, "days_left": None,
+            "label": None, "license_id": None}
     path = get_license_path()
     if not os.path.exists(path):
-        return {"valid": False, "reason": "missing", "expiry": None, "days_left": None, "label": None}
+        return base
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
+
+        # ---- Nouveau format .lic (signé Ed25519) : re-vérifie tout à chaque démarrage.
+        if data.get("kind") == LICENSE_KIND or "license_id" in data:
+            payload = {k: v for k, v in data.items() if k != "signature"}
+            result = dict(base)
+            result.update({"expiry": data.get("expiry_date"),
+                           "label": data.get("licensee"),
+                           "license_id": data.get("license_id")})
+            if not verify_license_signature(payload, data.get("signature")):
+                result["reason"] = "tampered"
+                return result
+            if data.get("license_id") in load_revocation_list():
+                result["reason"] = "revoked"
+                return result
+            try:
+                expiry_date = datetime.date.fromisoformat(data["expiry_date"])
+            except (KeyError, TypeError, ValueError):
+                result["reason"] = "tampered"
+                return result
+            days_left = (expiry_date - datetime.date.today()).days
+            result["days_left"] = days_left
+            if days_left < 0:
+                result["reason"] = "expired"
+                return result
+            result.update({"valid": True, "reason": "ok"})
+            return result
+
+        # ---- Ancien format : jeton HMAC (compatibilité ascendante).
         parsed = _decode_token(data.get("token", ""))
         if not parsed or parsed["expiry"] != data.get("expiry"):
-            return {"valid": False, "reason": "tampered", "expiry": None, "days_left": None, "label": None}
+            result = dict(base)
+            result["reason"] = "tampered"
+            return result
         expiry_date = datetime.date.fromisoformat(parsed["expiry"])
         days_left = (expiry_date - datetime.date.today()).days
         if days_left < 0:
-            return {"valid": False, "reason": "expired", "expiry": parsed["expiry"], "days_left": days_left, "label": parsed["label"]}
-        return {"valid": True, "reason": "ok", "expiry": parsed["expiry"], "days_left": days_left, "label": parsed["label"]}
+            return {"valid": False, "reason": "expired", "expiry": parsed["expiry"],
+                    "days_left": days_left, "label": parsed["label"], "license_id": None}
+        return {"valid": True, "reason": "ok", "expiry": parsed["expiry"],
+                "days_left": days_left, "label": parsed["label"], "license_id": None}
     except Exception:
         logger.warning("Erreur lors de la vérification de la licence: %s", path, exc_info=True)
-        return {"valid": False, "reason": "error", "expiry": None, "days_left": None, "label": None}
+        result = dict(base)
+        result["reason"] = "error"
+        return result

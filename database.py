@@ -331,9 +331,33 @@ def ensure_schema():
                 password_hash TEXT,
                 salt TEXT,
                 role TEXT,
-                created_at TEXT
+                created_at TEXT,
+                disabled INTEGER DEFAULT 0,
+                full_name TEXT
             )
         """)
+        cols_u = [row[1] for row in conn.execute("PRAGMA table_info(users)")]
+        if "disabled" not in cols_u:
+            conn.execute("ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0")
+        if "full_name" not in cols_u:
+            conn.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+
+        # Registre des licences émises par l'Administrateur (suivi, révocation)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS licenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                license_id TEXT UNIQUE,
+                licensee TEXT,
+                created_at TEXT,
+                start_date TEXT,
+                expiry_date TEXT,
+                duration_days INTEGER,
+                revoked INTEGER DEFAULT 0,
+                revoked_at TEXT,
+                signature TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_licenses_licensee ON licenses(licensee)")
         conn.commit()
 
 
@@ -746,14 +770,15 @@ def _hash_password(password, salt=None):
     return digest, salt
 
 
-def create_user(username, password, role):
+def create_user(username, password, role, full_name=None):
     if role not in ROLES:
         raise ValueError(f"Rôle invalide : {role}")
     password_hash = _hash_password_pbkdf2(password)
     with db_connection() as conn:
         conn.execute(
-            "INSERT INTO users (username, password_hash, salt, role, created_at) VALUES (?, ?, ?, ?, ?)",
-            (username, password_hash, None, role, datetime.datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO users (username, password_hash, salt, role, created_at, disabled, full_name) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (username, password_hash, None, role, datetime.datetime.now().isoformat(timespec="seconds"), full_name),
         )
         conn.commit()
 
@@ -762,6 +787,8 @@ def authenticate(username, password):
     with db_connection() as conn:
         row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     if not row:
+        return None
+    if row["disabled"]:
         return None
     if not verify_password(password, row["password_hash"], legacy_salt=row["salt"]):
         return None
@@ -787,14 +814,31 @@ def _upgrade_user_password(user_id, password):
 
 def fetch_users():
     with db_connection() as conn:
-        rows = conn.execute("SELECT id, username, role, created_at FROM users ORDER BY username").fetchall()
+        rows = conn.execute(
+            "SELECT id, username, role, created_at, disabled, full_name FROM users ORDER BY username"
+        ).fetchall()
     return [dict(r) for r in rows]
+
+
+def fetch_user_by_username(username):
+    with db_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return dict(row) if row else None
 
 
 def user_count():
     with db_connection() as conn:
         n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     return n
+
+
+def set_user_disabled(username, disabled):
+    """Désactive (True) ou réactive (False) un compte : un compte désactivé ne
+    peut plus se connecter (``authenticate`` renvoie None)."""
+    with db_connection() as conn:
+        conn.execute("UPDATE users SET disabled = ? WHERE username = ?",
+                     (1 if disabled else 0, username))
+        conn.commit()
 
 
 def update_user_role(user_id, role):
@@ -831,3 +875,57 @@ def delete_all_users():
         cur = conn.execute("DELETE FROM users")
         conn.commit()
         return cur.rowcount
+
+
+# --------------------------------------------------------------- registre licences
+def insert_license(doc):
+    """Enregistre une licence émise dans le registre de l'Administrateur.
+    ``doc`` est le document retourné par ``licensing.generate_license_file``."""
+    with db_connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO licenses "
+            "(license_id, licensee, created_at, start_date, expiry_date, duration_days, revoked, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+            (doc.get("license_id"), doc.get("licensee"), doc.get("created_at"),
+             doc.get("start_date"), doc.get("expiry_date"), doc.get("duration_days"),
+             doc.get("signature")),
+        )
+        conn.commit()
+
+
+def fetch_licenses():
+    with db_connection() as conn:
+        rows = conn.execute("SELECT * FROM licenses ORDER BY created_at DESC, id DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_license_by_id(license_id):
+    with db_connection() as conn:
+        row = conn.execute("SELECT * FROM licenses WHERE license_id = ?", (license_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def licenses_count():
+    with db_connection() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM licenses").fetchone()[0]
+    return n
+
+
+def revoke_license(license_id):
+    with db_connection() as conn:
+        conn.execute("UPDATE licenses SET revoked = 1, revoked_at = ? WHERE license_id = ?",
+                     (datetime.datetime.now().isoformat(timespec="seconds"), license_id))
+        conn.commit()
+
+
+def unrevoke_license(license_id):
+    with db_connection() as conn:
+        conn.execute("UPDATE licenses SET revoked = 0, revoked_at = NULL WHERE license_id = ?",
+                     (license_id,))
+        conn.commit()
+
+
+def revoked_license_ids():
+    with db_connection() as conn:
+        rows = conn.execute("SELECT license_id FROM licenses WHERE revoked = 1").fetchall()
+    return [r["license_id"] for r in rows]

@@ -3,5 +3,6 @@ matplotlib>=3.8
 reportlab>=4.0
 pypdf>=4.0
 python-docx>=1.1.0
+cryptography>=41.0
 pywin32>=306; sys_platform == 'win32'
 pyinstaller>=6.0
