@@ -3012,51 +3012,40 @@ class FicheSinistreDialog(tk.Toplevel):
 
 
 class InitialSetupDialog(tk.Toplevel):
-    """Écran de configuration initiale au tout premier lancement (aucun compte existant).
+    """Écran de configuration initiale de la SESSION GESTIONNAIRE (aucun compte
+    existant). Le Gestionnaire crée SON PROPRE compte (nom + mot de passe) puis
+    active sa licence avec le fichier (.lic) remis par l'Administrateur.
 
-    Permet deux modes de démarrage :
-    1. Mode Gestionnaire (Utilisateur final) : Le gestionnaire crée SON PROPRE
-       compte (nom + mot de passe) puis active sa licence de 1 an avec le fichier
-       (.lic) remis par l'Administrateur. L'accès Administrateur reste réservé.
-    2. Mode Éditeur (Administrateur principal) : Permet à l'Éditeur d'installer le
-       premier compte Administrateur principal sur son propre poste.
-    """
+    ⚠️ La création du compte Administrateur se fait UNIQUEMENT via l'écran de
+    choix de session → « 👑 Session Administrateur »."""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.app = parent
-        self.title("Bienvenue — Configuration de Sinistres App")
-        self.geometry("540x440")
+        self.title("Activation Gestionnaire — Sinistres App")
+        self.geometry("540x360")
         self.protocol("WM_DELETE_WINDOW", self._quit_app)
         self.grab_set()
         self.resizable(False, False)
 
         tk.Label(self, text="Bienvenue dans Sinistres App 👋", font=("Segoe UI", 14, "bold")).pack(pady=(16, 4))
-        tk.Label(self, text="Pour commencer, veuillez choisir votre mode d'activation :",
+        tk.Label(self, text="Pour utiliser l'application, créez votre compte Gestionnaire\npuis activez la licence remise par votre administrateur :",
                  justify="center", fg="#555").pack(pady=(0, 12))
 
-        # ---- Option 1 : Gestionnaire (compte + fichier de licence .lic) ----
-        card_client = tk.LabelFrame(self, text=" 🔑 Activation Gestionnaire (Client / Collègue) ",
+        # ---- Activation Gestionnaire (compte + fichier de licence .lic) ----
+        card_client = tk.LabelFrame(self, text=" 🔑 Activation Gestionnaire ",
                                     font=("Segoe UI", 10, "bold"), fg=COLOR_PRIMARY, padx=14, pady=12)
         card_client.pack(fill="x", padx=24, pady=8)
         tk.Label(card_client,
-                 text="Vous êtes Gestionnaire ? Créez votre propre compte, puis\n"
-                      "activez votre licence avec le fichier (.lic) remis par\n"
-                      "votre administrateur.",
+                 text="Créez votre propre nom d'utilisateur et mot de passe, puis\n"
+                      "sélectionnez votre fichier de licence (.lic).",
                  justify="left", fg="#444", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 10))
         ttk.Button(card_client, text="📂 Créer mon compte et activer ma licence (.lic)",
                    command=self._activate_client).pack(anchor="w")
 
-        # ---- Option 2 : Éditeur / Administrateur principal ----
-        card_admin = tk.LabelFrame(self, text=" 👑 Configuration Éditeur (Administrateur Principal) ",
-                                   font=("Segoe UI", 10, "bold"), fg="#885500", padx=14, pady=12)
-        card_admin.pack(fill="x", padx=24, pady=14)
-        tk.Label(card_admin,
-                 text="Vous êtes l'Éditeur du logiciel et configurez votre poste administrateur ?\n"
-                      "Cette option est réservée au gestionnaire principal du système.",
-                 justify="left", fg="#665500", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 10))
-        ttk.Button(card_admin, text="👑 Créer le compte Administrateur Principal",
-                   command=self._setup_admin).pack(anchor="w")
+        tk.Label(self, text="Vous êtes le propriétaire / administrateur ?\n"
+                            "Fermez cette fenêtre et choisissez « 👑 Session Administrateur » à l'écran précédent.",
+                 justify="center", fg="#777", font=("Segoe UI", 8)).pack(pady=(14, 0))
 
         self.wait_window(self)
 
@@ -3070,10 +3059,6 @@ class InitialSetupDialog(tk.Toplevel):
         # « Retour », cet écran est réaffiché (voir ActivationDialog).
         self.withdraw()
         ActivationDialog(self.app, require_account=True, initial=self)
-
-    def _setup_admin(self):
-        self.destroy()
-        FirstAdminSetupDialog(self.app)
 
 
 class ClientAccessExportDialog(tk.Toplevel):

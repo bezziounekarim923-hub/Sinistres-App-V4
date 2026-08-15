@@ -83,6 +83,9 @@ def build(mode="--onedir"):
         APP_NAME,
         "--distpath",
         OUTPUT_DIR,
+        # cryptography (Ed25519) doit être empaqueté intégralement, sinon la
+        # génération de licence échoue dans l'exécutable compilé.
+        "--collect-all", "cryptography",
         *add_data,
         *hidden_imports,
         "main.py",

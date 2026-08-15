@@ -81,7 +81,14 @@ class AdminFirstSetupDialog(tk.Toplevel):
             messagebox.showwarning("Erreur", "Les deux mots de passe ne correspondent pas.")
             return
         db.create_user(username, password, "Administrateur")
-        licensing.ensure_signing_keys()
+        try:
+            licensing.ensure_signing_keys()
+        except Exception as e:
+            messagebox.showwarning(
+                "Clés de licence",
+                f"Le compte a été créé, mais la génération des clés de licence a échoué :\n{e}\n\n"
+                "La génération de licence pourrait ne pas fonctionner. Vérifiez que la "
+                "bibliothèque « cryptography » est bien installée (relancez 1_installer.bat).")
         db.log_action(username, "CREATION_COMPTE_ADMINISTRATEUR", dossier_label=username,
                       nouvelle_valeur={"username": username, "role": "Administrateur"})
         messagebox.showinfo("Compte créé", f"Le compte Administrateur « {username} » a été créé.\nVous pouvez maintenant vous connecter.")
@@ -274,11 +281,12 @@ class AdminConsole(tk.Tk):
             db.log_action(self.current_user, "CREATION_COMPTE_GESTIONNAIRE", dossier_label=username,
                           nouvelle_valeur={"username": username, "role": "Gestionnaire", "full_name": full_name})
             self._refresh_comptes()
-            messagebox.showinfo("Compte créé",
-                                f"Le compte Gestionnaire « {username} » a été créé.\n\n"
-                                "Vous pouvez maintenant lui générer une licence (.lic) dans l'onglet « Licences ».",
-                                parent=dlg)
             dlg.destroy()
+            if messagebox.askyesno(
+                    "Compte créé ✅",
+                    f"Le compte Gestionnaire « {username} » a été créé.\n\n"
+                    "Voulez-vous lui générer maintenant sa licence (.lic) ?"):
+                self._generate_license(licensee=username)
 
         ttk.Button(dlg, text="✅ Créer", command=create).pack(pady=10)
 
@@ -360,10 +368,15 @@ class AdminConsole(tk.Tk):
         top = tk.Frame(self.tab_licences, bg=COLOR_BG)
         top.pack(fill="x", padx=12, pady=10)
         ttk.Button(top, text="🎟️ Générer une licence", command=lambda: self._generate_license()).pack(side="left", padx=4)
+        ttk.Button(top, text="➕ Créer un compte Gestionnaire", command=self._create_gestionnaire).pack(side="left", padx=4)
         ttk.Button(top, text="⛔ Révoquer", command=self._revoke).pack(side="left", padx=4)
         ttk.Button(top, text="✅ Réactiver", command=self._unrevoke).pack(side="left", padx=4)
         ttk.Button(top, text="🔄 Régénérer (renouveler)", command=self._renew).pack(side="left", padx=4)
         ttk.Button(top, text="📄 Exporter la liste de révocation", command=self._export_revocations).pack(side="right", padx=4)
+
+        tk.Label(self.tab_licences,
+                 text="💡 Une licence est toujours liée à un compte Gestionnaire : créez d'abord le compte, puis générez sa licence.",
+                 bg=COLOR_BG, fg="#555555", font=("Segoe UI", 8)).pack(anchor="w", padx=12, pady=(0, 4))
 
         cols = ["license_id", "licensee", "created_at", "start_date", "expiry_date", "jours", "statut"]
         headers = ["Licence", "Gestionnaire", "Créée le", "Début", "Expiration", "Jours rest.", "Statut"]
@@ -420,7 +433,14 @@ class AdminConsole(tk.Tk):
     def _generate_license(self, licensee=None):
         users = [u for u in db.fetch_users() if u["role"] in ("Gestionnaire", "Consultation")]
         if not users:
-            messagebox.showwarning("Aucun compte", "Créez d'abord un compte Gestionnaire dans l'onglet « Comptes ».")
+            if messagebox.askyesno(
+                    "Aucun compte Gestionnaire",
+                    "Aucun compte Gestionnaire n'existe encore.\n\n"
+                    "Une licence est toujours liée à un compte Gestionnaire :\n"
+                    "il faut d'abord créer ce compte.\n\n"
+                    "Voulez-vous créer un compte Gestionnaire maintenant ?"):
+                self.notebook.select(self.tab_comptes)
+                self._create_gestionnaire()
             return
 
         dlg = tk.Toplevel(self)
