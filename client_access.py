@@ -155,3 +155,92 @@ def import_client_access_file(filepath):
         conn.commit()
 
     return True, client["username"], lic_data.get("expiry")
+
+
+# ------------------------------------------------------------------ licence seule
+def export_license_file(output_path, label="", duration_days=365):
+    """Génère un fichier de LICENCE signé (.sini), SANS identifiants de compte.
+
+    Destiné à être remis à un gestionnaire/client : au premier lancement, le
+    gestionnaire crée SON PROPRE compte (nom + mot de passe) puis active sa
+    licence (1 an par défaut) avec ce fichier.
+
+    - label : nom du gestionnaire (libellé inscrit sur la licence)
+    - duration_days : durée de la licence (par défaut 365 jours = 1 an)
+    """
+    now = datetime.datetime.now()
+    expiry_dt = now + datetime.timedelta(days=duration_days)
+    expiry_str = expiry_dt.strftime("%Y-%m-%d")
+    token = licensing.generate_license_token(duration_days=duration_days, label=label.strip())
+
+    payload = {
+        "format_version": "2.0",
+        "kind": "license",
+        "created_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "label": label.strip(),
+        "license": {
+            "token": token,
+            "expiry": expiry_str,
+            "duration_days": duration_days,
+        },
+    }
+
+    sig = _sign_payload(payload)
+    final_dict = {"payload": payload, "signature": sig}
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        json.dump(final_dict, fh, indent=2, ensure_ascii=False)
+    return output_path
+
+
+def detect_client_file_kind(filepath):
+    """Retourne le type d'un fichier d'activation :
+    - 'license' : fichier de licence seule (format v2) ;
+    - 'full'    : ancien fichier .sini complet avec compte pré-enregistré (format v1)."""
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Fichier introuvable : {filepath}")
+    with open(filepath, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    payload = data.get("payload") or {}
+    if payload.get("client_user") or payload.get("admin_user"):
+        return "full"
+    return "license"
+
+
+def import_license_file(filepath):
+    """Active la licence contenue dans un fichier de licence seule (.sini v2).
+
+    Ne crée AUCUN compte utilisateur : c'est le gestionnaire qui crée le sien.
+    Retourne (True, expiry, label) ou lève une ValueError / FileNotFoundError.
+    """
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Fichier introuvable : {filepath}")
+
+    with open(filepath, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    payload = data.get("payload")
+    sig = data.get("signature")
+    if not payload or not sig:
+        raise ValueError("Fichier de licence invalide ou corrompu (structure incorrecte).")
+
+    # Refuse explicitement l'ancien format complet : il contient des comptes.
+    if payload.get("client_user") or payload.get("admin_user"):
+        raise ValueError("Ce fichier est un ancien accès complet (.sini) : utilisez l'activation complète.")
+
+    expected_sig = _sign_payload(payload)
+    if not hmac.compare_digest(sig, expected_sig):
+        raise ValueError("Signature invalide : ce fichier n'a pas été émis par l'éditeur officiel.")
+
+    lic_data = payload.get("license", {})
+    token = lic_data.get("token")
+    if not token:
+        raise ValueError("Aucune licence présente dans ce fichier.")
+
+    licensing.apply_license_token(token)
+    status = licensing.check_license()
+    if not status["valid"]:
+        raise ValueError("La licence incluse dans ce fichier a expiré ou est invalide.")
+
+    return True, lic_data.get("expiry"), payload.get("label") or lic_data.get("label", "")
