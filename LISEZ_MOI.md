@@ -24,13 +24,26 @@ Il reçoit un unique fichier d'installation officiel :
   ```
 * **Mises à jour sans perte** : L'installation d'une nouvelle version (`4.1`, `4.2`, etc.) ou la désinstallation via *Paramètres Windows > Applications* n'efface jamais vos données personnelles dans `%APPDATA%\SinistresApp\`.
 
+### 🖥️ Choix de session (à chaque lancement)
+
+Au lancement de l'application (double-clic sur l'icône **Sinistres App**), un
+écran de **choix de session** s'affiche à chaque fois :
+
+| Session | Pour qui ? | Ce qu'elle fait |
+|---|---|---|
+| **👑 Session Administrateur** | Le propriétaire de l'application | Console d'administration : crée les comptes Gestionnaire, gère les licences (.lic) |
+| **🧑‍💼 Session Gestionnaire** | Les utilisateurs/clients | Gestion des sinistres, avec un compte activé par une licence (.lic) |
+
+Chaque session demande ses propres identifiants. Un Gestionnaire ne peut
+**jamais** entrer dans la session Administrateur.
+
 ### 👑 Session Administrateur (propriétaire) — Console dédiée :
-La session Administrateur est **totalement séparée** de l'application Gestionnaire :
-1. Lancez la **Console d'administration** : `5_console_admin.bat` (ou `python admin_console.py`). Elle demande le **nom d'utilisateur + mot de passe Administrateur** (définis au premier lancement).
-2. Depuis la console :
+Depuis l'écran de choix de session, cliquez sur **« 👑 Ouvrir la session
+Administrateur »** : la console demande le **nom d'utilisateur + mot de passe
+Administrateur** (définis au premier lancement). Elle permet :
    - **👥 Comptes Gestionnaire** : créer, réinitialiser le mot de passe, **désactiver/réactiver**, supprimer un compte ;
    - **🎟️ Licences** : générer une licence (durée par défaut **1 an = 365 jours**, modifiable), consulter la date de création et d'expiration, **révoquer**, **régénérer**, et exporter la liste de révocation.
-3. Les identifiants Administrateur et la **clé privée de signature** ne sont **jamais** présents chez le Gestionnaire.
+Les identifiants Administrateur et la **clé privée de signature** ne sont **jamais** présents chez le Gestionnaire.
 
 ### 🔑 Fichier de licence (.lic) — signature sécurisée :
 - Chaque licence est un fichier **`.lic`** (ex : `licence_gestionnaire_karim_365j.lic`) contenant : identifiant unique `LIC-XXXXXXXX`, compte lié, dates de création / début / expiration, durée, et une **signature Ed25519**.
@@ -73,8 +86,8 @@ Le pipeline exécute 4 étapes vérifiées :
 
 | Fichier / Dossier | Rôle |
 |---|---|
-| `main.py` | L'application Gestionnaire (interface graphique et logique principale) |
-| `admin_console.py` | **Console d'administration** (session Administrateur séparée : comptes + licences) |
+| `main.py` | **Point d'entrée unique** : écran de choix de session + application Gestionnaire (interface graphique et logique principale) |
+| `admin_console.py` | **Console d'administration** (session Administrateur : comptes + licences), accessible depuis l'écran de choix de session |
 | `licensing.py` | Licences `.lic` signées Ed25519 (clé privée côté Admin, clé publique côté client), révocation |
 | `database.py` | Base de données SQLite (sinistres, utilisateurs, registre des licences) et gestion sécurisée des chemins `%APPDATA%` |
 | `fiche_sinistre_word.py` | Scanner intelligent et générateur de fiches Word (`.doc` & `.docx`) |

@@ -31,6 +31,7 @@ import importer
 import analytics as an
 import licensing
 import fiche_sinistre as fiche
+import admin_console
 from date_utils import (
     DATE_INPUT_FORMATS,
     parse_date_input,
@@ -4230,6 +4231,89 @@ def save_settings(settings):
         pass
 
 
+class SessionSelector(tk.Tk):
+    """Écran de choix de session, affiché à CHAQUE lancement de l'application :
+
+    - 👑 Session Administrateur : console d'administration (propriétaire) ;
+    - 🧑‍💼 Session Gestionnaire : application de gestion des sinistres (utilisateur).
+
+    C'est le point d'entrée unique : cliquer sur l'icône de l'application ouvre
+    cet écran, puis la session choisie."""
+
+    def __init__(self):
+        super().__init__()
+        self.choice = None
+        self.title("Sinistres App — Choix de la session")
+        self.geometry("620x400")
+        self.configure(bg=COLOR_BG)
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+
+        header = tk.Frame(self, bg=COLOR_PRIMARY, height=64)
+        header.pack(side="top", fill="x")
+        tk.Label(header, text="🚚  SINISTRES APP", bg=COLOR_PRIMARY, fg="white",
+                 font=("Segoe UI", 17, "bold")).pack(pady=14)
+
+        tk.Label(self, text="Bienvenue ! Choisissez votre session :", bg=COLOR_BG,
+                 fg="#333333", font=("Segoe UI", 12, "bold")).pack(pady=(22, 12))
+
+        body = tk.Frame(self, bg=COLOR_BG)
+        body.pack(fill="both", expand=True, padx=30)
+
+        # --- Carte Administrateur ---
+        card_admin = tk.Frame(body, bg=COLOR_CARD, highlightbackground="#c9d4e4", highlightthickness=1)
+        card_admin.pack(side="left", fill="both", expand=True, padx=8, pady=(0, 16))
+        tk.Label(card_admin, text="👑", font=("Segoe UI", 34), bg=COLOR_CARD).pack(pady=(20, 2))
+        tk.Label(card_admin, text="Session Administrateur", bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                 font=("Segoe UI", 12, "bold")).pack()
+        tk.Label(card_admin,
+                 text="Propriétaire de l'application.\nCrée les comptes Gestionnaire\net gère les licences (.lic).",
+                 bg=COLOR_CARD, fg="#666666", justify="center",
+                 font=("Segoe UI", 9)).pack(pady=(8, 12))
+        ttk.Button(card_admin, text="👑 Ouvrir la session Administrateur",
+                   command=self._choose_admin).pack(pady=(0, 18))
+
+        # --- Carte Gestionnaire ---
+        card_gest = tk.Frame(body, bg=COLOR_CARD, highlightbackground="#c9d4e4", highlightthickness=1)
+        card_gest.pack(side="left", fill="both", expand=True, padx=8, pady=(0, 16))
+        tk.Label(card_gest, text="🧑‍💼", font=("Segoe UI", 34), bg=COLOR_CARD).pack(pady=(20, 2))
+        tk.Label(card_gest, text="Session Gestionnaire", bg=COLOR_CARD, fg=COLOR_PRIMARY,
+                 font=("Segoe UI", 12, "bold")).pack()
+        tk.Label(card_gest,
+                 text="Utilisateur de l'application.\nGère les sinistres avec un compte\nactivé par une licence (.lic).",
+                 bg=COLOR_CARD, fg="#666666", justify="center",
+                 font=("Segoe UI", 9)).pack(pady=(8, 12))
+        ttk.Button(card_gest, text="🧑‍💼 Ouvrir la session Gestionnaire",
+                   command=self._choose_gestionnaire).pack(pady=(0, 18))
+
+    def _close(self):
+        self.choice = None
+        self.destroy()
+
+    def _choose_admin(self):
+        self.choice = "admin"
+        self.destroy()
+
+    def _choose_gestionnaire(self):
+        self.choice = "gestionnaire"
+        self.destroy()
+
+
+def run():
+    """Point d'entrée unique de l'application : choix de session puis lancement
+    de la session sélectionnée (Administrateur ou Gestionnaire)."""
+    selector = SessionSelector()
+    selector.mainloop()
+    choice = selector.choice
+
+    if choice == "admin":
+        app = admin_console.AdminConsole()
+        if getattr(app, "current_user", None):
+            app.mainloop()
+    elif choice == "gestionnaire":
+        app = App()
+        app.mainloop()
+
+
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    run()
