@@ -461,7 +461,7 @@ class AdminConsole(tk.Tk):
         e_days = ttk.Entry(form, width=12)
         e_days.insert(0, str(licensing.DEFAULT_DURATION_DAYS))
         e_days.grid(row=1, column=1, sticky="w", pady=6)
-        tk.Label(form, text="(365 jours = 1 an)").grid(row=2, column=1, sticky="w", fg="#888")
+        tk.Label(form, text="(365 jours = 1 an)", fg="#888").grid(row=2, column=1, sticky="w")
 
         def generate():
             licensee_sel = cb_user.get().strip()
