@@ -374,6 +374,11 @@ si vous voulez que j'ajoute l'une de ces analyses.
   `4_recuperer_compte.bat`. Cet outil fonctionne sans avoir besoin de se
   connecter : il liste les comptes existants et vous permet de définir un
   nouveau mot de passe pour l'un d'eux directement.
+- **Supprimer tous les comptes pour repartir de zéro** → double-cliquez sur
+  `4_recuperer_compte.bat` puis choisissez l'option **« 2) Supprimer TOUS les
+  comptes »** (confirmation requise). Les sinistres, pièces jointes et
+  sauvegardes ne sont **pas** supprimés ; au prochain lancement, l'application
+  vous demandera de créer un nouveau compte Administrateur.
 
 
 - **"Python n'est pas reconnu..."** → Réinstallez Python en cochant bien

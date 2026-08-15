@@ -816,3 +816,18 @@ def delete_user(user_id):
     with db_connection() as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
+
+
+def delete_all_users():
+    """Supprime TOUS les comptes utilisateurs (Administrateur, Gestionnaire,
+    Consultation) de la base. Utilisé pour repartir de zéro : au prochain
+    lancement de l'application, l'écran de création du compte Administrateur
+    principal s'affichera à nouveau. Retourne le nombre de comptes supprimés.
+
+    ⚠️ Opération irréversible : les identifiants et mots de passe sont effacés
+    définitivement. Les sinistres et pièces jointes ne sont PAS touchés.
+    """
+    with db_connection() as conn:
+        cur = conn.execute("DELETE FROM users")
+        conn.commit()
+        return cur.rowcount

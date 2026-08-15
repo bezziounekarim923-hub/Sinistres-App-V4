@@ -86,6 +86,24 @@ class UserPasswordTests(_IsolatedDir):
         self.assertFalse(db.verify_password("Pw", h))
         self.assertFalse(db.verify_password("pw", "not-a-real-hash"))
 
+    def test_delete_all_users_removes_every_account(self):
+        db.create_user("admin1", "pw-admin", "Administrateur")
+        db.create_user("gest", "pw-gest", "Gestionnaire")
+        db.create_user("lecteur", "pw-lect", "Consultation")
+        self.assertEqual(db.user_count(), 3)
+
+        removed = db.delete_all_users()
+
+        self.assertEqual(removed, 3)
+        self.assertEqual(db.user_count(), 0)
+        self.assertIsNone(db.authenticate("admin1", "pw-admin"))
+        self.assertIsNone(db.authenticate("gest", "pw-gest"))
+        self.assertIsNone(db.authenticate("lecteur", "pw-lect"))
+
+    def test_delete_all_users_returns_zero_when_none(self):
+        self.assertEqual(db.user_count(), 0)
+        self.assertEqual(db.delete_all_users(), 0)
+
 
 # --------------------------------------------------------------- S1 : mot de passe maître
 class MasterPasswordTests(_IsolatedDir):
